@@ -62,6 +62,6 @@ scripts/errors.sh [retail|forever] [pattern] [--all-sessions]   # !BugGrabber er
 - `check.sh` runs `~/Dev/EllesmereUI/.tools/guardrails.py` from a copy in `.tools/` against the repository's empty root commit, so every file is checked in full. CI does the same with a sparse EUI checkout.
 - Hooks: run `lefthook install` once per clone. Pre-commit checks staged files (gitleaks, luac, luacheck, TOC, shellcheck, YAML, actionlint); pre-push runs `scripts/check.sh`. Never skip them with `--no-verify`.
 - Commit only when `scripts/check.sh` passes. Push only when asked.
-- Sync only the flavour the change targets, preview with `--dry-run` first, then ask the user to `/reload`, or to restart the client when the script says the TOC changed (the game reads a TOC only at start). Read errors after the reload with `scripts/errors.sh`. Never type into the game client.
+- Sync only the flavour the change targets, preview with `--dry-run` first, then ask the user to `/reload`. A reload also loads a newly added addon; no client restart is needed. Read errors after the reload with `scripts/errors.sh`. Never type into the game client.
 - Release: `scripts/release.sh patch|minor|major` tags `vX.Y.Z`; the release workflow packages it with the BigWigs packager once CI passes on that commit.
 - Never commit SavedVariables, WTF data, logs or packaged zips.

@@ -34,20 +34,12 @@ for flavor in "${flavors[@]}"; do
     [[ -d "$addons" ]] || { echo "missing $addons" >&2; exit 1; }
     dest="$addons/LKS_UI"
 
-    restart=""
-    cmp -s LKS_UI.toc "$dest/LKS_UI.toc" || restart=1
-
     (( ${#dry[@]} )) || mkdir -p "$dest"
     rsync -a --delete --delete-excluded "${dry[@]}" --itemize-changes "${excludes[@]}" ./ "$dest/"
 
     if (( ${#dry[@]} )); then
         echo "$flavor: dry run, nothing written"
     else
-        echo "$flavor: synced"
-    fi
-    if [[ -n "$restart" ]]; then
-        echo "$flavor: LKS_UI.toc is new or changed; restart the game client, /reload does not reread it"
-    else
-        echo "$flavor: /reload to load the changes"
+        echo "$flavor: synced, /reload to load the changes"
     fi
 done
