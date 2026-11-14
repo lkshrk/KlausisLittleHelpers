@@ -4,31 +4,50 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WOW_DIR="${WOW_DIR:-/mnt/stuff/Games/World of Warcraft}"
-target="${1:-}"
+
+usage() { echo "usage: $0 retail|forever|all [--dry-run]" >&2; exit 1; }
+
+target=""
 dry=()
-[[ "${2:-}" == "--dry-run" ]] && dry=(--dry-run)
+for arg in "$@"; do
+    case "$arg" in
+        retail|forever|all) [[ -z "$target" ]] || usage; target="$arg" ;;
+        --dry-run) dry=(--dry-run) ;;
+        *) usage ;;
+    esac
+done
 
 case "$target" in
     retail) flavors=(_retail_) ;;
     forever) flavors=(_forever_) ;;
     all) flavors=(_retail_ _forever_) ;;
-    *) echo "usage: $0 retail|forever|all [--dry-run]" >&2; exit 1 ;;
+    *) usage ;;
 esac
 
-mapfile -t payload < <(lua5.1 -e '
-for line in io.lines("LKS_UI.toc") do
-    line = line:gsub("\r$", "")
-    if line ~= "" and not line:find("^#") then print((line:gsub("\\", "/"))) end
-end')
-payload+=(LKS_UI.toc)
-[[ -d media ]] && payload+=(media)
+excludes=(--exclude='.*' --exclude='*.zip')
+while IFS= read -r path; do
+    excludes+=(--exclude="/${path%/}")
+done < <(sed -n '/^ignore:/,/^[^[:space:]-]/s/^[[:space:]]*-[[:space:]]*//p' .pkgmeta | tr -d '\r')
 
 for flavor in "${flavors[@]}"; do
     addons="$WOW_DIR/$flavor/Interface/AddOns"
     [[ -d "$addons" ]] || { echo "missing $addons" >&2; exit 1; }
     dest="$addons/LKS_UI"
-    [[ "$dest" == */Interface/AddOns/LKS_UI ]] || exit 1
+
+    restart=""
+    cmp -s LKS_UI.toc "$dest/LKS_UI.toc" || restart=1
+
     (( ${#dry[@]} )) || mkdir -p "$dest"
-    rsync -a --delete --relative "${dry[@]}" --itemize-changes "${payload[@]}" "$dest/"
-    echo "synced $flavor${dry:+ (dry run)}"
+    rsync -a --delete --delete-excluded "${dry[@]}" --itemize-changes "${excludes[@]}" ./ "$dest/"
+
+    if (( ${#dry[@]} )); then
+        echo "$flavor: dry run, nothing written"
+    else
+        echo "$flavor: synced"
+    fi
+    if [[ -n "$restart" ]]; then
+        echo "$flavor: LKS_UI.toc is new or changed; restart the game client, /reload does not reread it"
+    else
+        echo "$flavor: /reload to load the changes"
+    fi
 done

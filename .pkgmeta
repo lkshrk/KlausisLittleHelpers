@@ -5,6 +5,7 @@ ignore:
   - .luacheckrc
   - AGENTS.md
   - CLAUDE.md
+  - lefthook.yml
   - README.md
   - renovate.json5
   - scripts
