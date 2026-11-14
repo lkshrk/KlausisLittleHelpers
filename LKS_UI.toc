@@ -1,0 +1,10 @@
+## Interface: 120000, 120001, 120005, 120007, 120100, 120105, 16001
+## Title: LKS_UI
+## Notes: Companion plugin for EllesmereUI.
+## Author: lkshrk
+## Version: 0.1.0
+## Dependencies: EllesmereUI
+## OptionalDeps: EllesmereUIQoL
+
+Core\LKS_UI_Core.lua
+Core\LKS_UI_Options.lua

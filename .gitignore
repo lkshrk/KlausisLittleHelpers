@@ -1,0 +1,10 @@
+.release/
+*.zip
+.luacheckcache
+.luarc.json
+.idea/
+.vscode/
+*.swp
+*~
+.eui/
+.tools/guardrails.py

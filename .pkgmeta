@@ -1,0 +1,11 @@
+package-as: LKS_UI
+
+ignore:
+  - .github
+  - .luacheckrc
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - renovate.json5
+  - scripts
+  - tests

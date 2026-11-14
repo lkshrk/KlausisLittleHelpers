@@ -1,0 +1,30 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks git --staged --redact --no-banner
+    luac:
+      glob: "*.lua"
+      exclude:
+        - "Libs/**"
+      run: 'for f in {staged_files}; do luac5.1 -p "$f" || exit 1; done'
+    luacheck:
+      glob: "*.lua"
+      run: luacheck --no-color -q {staged_files}
+    toc:
+      glob: "{*.toc,*.lua}"
+      run: lua5.1 .tools/check-toc.lua LKS_UI.toc
+    shellcheck:
+      glob: "scripts/*.sh"
+      run: shellcheck -S warning {staged_files}
+    yaml:
+      glob: "*.{yaml,yml}"
+      run: 'for f in {staged_files}; do yq "." "$f" >/dev/null || exit 1; done'
+    actionlint:
+      glob: ".github/workflows/*.yml"
+      run: 'command -v actionlint >/dev/null || { echo "actionlint not installed, skipping"; exit 0; }; actionlint {staged_files}'
+
+pre-push:
+  commands:
+    check:
+      run: scripts/check.sh
