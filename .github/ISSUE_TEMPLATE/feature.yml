@@ -1,0 +1,59 @@
+name: Feature request or idea
+description: Suggest a new little helper or an improvement to an existing one
+title: "[Idea] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea? Great! Small, everyday annoyances in WoW are exactly what this addon is for. Describe it in your own words, no technical details needed.
+
+  - type: dropdown
+    id: feature
+    attributes:
+      label: What is it about?
+      options:
+        - A brand new helper
+        - Writ & Crate Planner
+        - Receipt or fill crate macros
+        - Turn-in Route
+        - RestedXP Quest Sync
+        - Soulstone Reminder
+        - TustUI Enhanced XP Bar
+        - Settings window (/klh)
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game
+    attributes:
+      label: Which game version would you use it on?
+      options:
+        - WoW Forever
+        - Retail (current expansion)
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: annoyance
+    attributes:
+      label: What bothers you today?
+      description: The tedious thing you keep doing, or what you're missing.
+      placeholder: "e.g. I keep tabbing out to look up which crate is cheapest to fill."
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: How should the helper work?
+      description: How you imagine it in game. Rough is fine, the details can be worked out together.
+      placeholder: "e.g. A button at the auction house that shows the three cheapest crates."
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, a sketch, or another addon that does something similar. You can drag and drop images here.

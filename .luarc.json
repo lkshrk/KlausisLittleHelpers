@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "diagnostics.globals": [
+    "KLH",
+    "KLH_DB",
+    "KLH_CharDB",
+    "SlashCmdList",
+    "LibStub",
+    "eq",
+    "ok",
+    "ns",
+    "TomTom",
+    "Questie",
+    "QuestieLoader",
+    "RXP",
+    "RXPCData",
+    "Auctionator",
+    "EllesmereUI",
+    "EUI",
+    "addon",
+    "find",
+    "has",
+    "EUI_CLIENT_BLOCKED"
+  ],
+  "diagnostics.disable": [
+    "duplicate-set-field",
+    "cast-local-type",
+    "redundant-parameter",
+    "undefined-field",
+    "deprecated"
+  ],
+  "workspace.ignoreDir": [
+    ".release",
+    ".ctxtmp",
+    "Libs"
+  ],
+  "workspace.checkThirdParty": false,
+  "workspace.library": [
+    "~/.local/share/wow/vscode-wow-api/Annotations"
+  ]
+}

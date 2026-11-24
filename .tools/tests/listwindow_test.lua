@@ -1,0 +1,20 @@
+ns.UI = {}
+addon("Core/ListWindow.lua")
+local L = ns.ListWindowLayout
+
+local h, scroll = L({}, 50, 300)
+eq(h, 50); eq(scroll, false, "empty list fits")
+h, scroll = L({ 20, 20 }, 50, 300)
+eq(h, 50 + 48); eq(scroll, false, "short list fits")
+h, scroll = L({ 100, 100, 100 }, 50, 300)
+eq(h, 300); eq(scroll, true, "long list scrolls")
+h, scroll = L({ 100, 100, 100 }, 50, 362)
+eq(h, 362); eq(scroll, false, "exact fit does not scroll")
+h, scroll = L({ 100, 100, 100 }, 50, 361)
+eq(h, 361); eq(scroll, true, "one pixel over scrolls")
+h, scroll = L({ 100, 100, 100 }, 50, nil)
+eq(h, 362); eq(scroll, false, "no max height never scrolls")
+local _, ignored = L({ 100 }, 50, 0)
+eq(ignored, false, "non-positive max ignored")
+h, scroll = L({ 100, 100 }, 50, 60)
+eq(h, 90); eq(scroll, true, "keeps a minimum viewport")

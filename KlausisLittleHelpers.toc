@@ -1,0 +1,36 @@
+## Interface: 120000, 120001, 120005, 120007, 120100, 120105, 16001
+## Title: Klausi's Little Helpers
+## Notes: Small helpers for questing, routes and professions.
+## Author: lkshrk
+## Version: @project-version@
+## OptionalDeps: Questie, RXPGuides, Tust_EUI, EllesmereUI, TomTom, Auctionator
+## X-Curse-Project-ID: 1829176
+## X-Wago-ID: mNwwB2No
+## SavedVariables: KLH_DB
+## SavedVariablesPerCharacter: KLH_CharDB
+
+Libs\embeds.xml
+
+Core\Core.lua
+Core\UI.lua
+Core\Skin.lua
+Core\Options.lua
+Core\ListWindow.lua
+Data\TaxiPaths.lua
+Data\Teleports.lua
+Data\Writs.lua
+Data\WaylaidCrates.lua
+Modules\WritCrateSearch.lua
+Modules\WritCrateState.lua
+Modules\TustUIXPBar.lua
+Modules\QuestieRXPSync.lua
+Modules\TurnInRouteGraph.lua
+Modules\RouteDraw.lua
+Modules\RouteWaypoints.lua
+Modules\RoutePlanner.lua
+Modules\TurnInRoute.lua
+Modules\WritCrateDepth.lua
+Modules\WritCrateUse.lua
+Modules\WritCratePlanner.lua
+Modules\SoulstoneLogic.lua
+Modules\SoulstoneReminder.lua

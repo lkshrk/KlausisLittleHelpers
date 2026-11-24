@@ -1,0 +1,27 @@
+package-as: KlausisLittleHelpers
+
+ignore:
+  - .claude
+  - .codex
+  - .ctxtmp
+  - .cursor
+  - .editorconfig
+  - .gemini
+  - .gitattributes
+  - .github
+  - .gitleaks.toml
+  - .luacheckrc
+  - .luarc.json
+  - .mcp.json
+  - .superpowers
+  - .tools
+  - .worktrees
+  - AGENTS.md
+  - CLAUDE.md
+  - docs
+  - lefthook.yml
+  - CONTRIBUTING.md
+  - README.md
+  - renovate.json5
+  - scripts
+  - tests
