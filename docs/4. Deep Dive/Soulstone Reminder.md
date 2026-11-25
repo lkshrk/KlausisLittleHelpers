@@ -14,7 +14,8 @@ Soulstone Reminder (feature key `SoulstoneReminder`, Forever only, QoL tab, sect
 
 - Active only in `party` or `raid` instances, as chosen by "Active in".
 - Nothing is drawn or sent while the group is busy: the player in combat, any group unit `UnitAffectingCombat`, `IsEncounterInProgress()`, or the player `UnitIsDeadOrGhost`. A trigger (combat end, ready check) that arrives then is held and retried every second until the group is clear, then fires once.
-- Members with `UnitIsConnected` false are skipped, so they are never suggested or whispered. If a resurrecting member is not `UnitIsVisible`, their buff state is unknown and nothing is shown.
+- Members with `UnitIsConnected` false are skipped, so they are never suggested or whispered. Members whose raid-roster zone (`GetRaidRosterInfo`) differs from the player's are outside the instance: they count as having no soulstone and are neither suggested nor whispered. If a resurrecting member inside the instance (or of unknown zone) is not `UnitIsVisible`, their buff state is unknown and nothing is shown.
+- `/klh soulstone` prints whether the reminder would show right now and, if not, why (`Evaluate` returns the reason as its second value), followed by each resurrecting member and warlock with level, range or zone, soulstone and readiness.
 - Levels: a warlock counts from level 18. Resurrecting classes count from their resurrect level: Priest 10, Paladin 12, Shaman 12, Druid 20 (Rebirth). Below that they neither need nor cover a stone.
 - Any counted resurrecting member with the buff covers the group; a stone on any other class does not.
 - Your own stone is ready when a soulstone item is in your bags and its cooldown is 0 or only the global cooldown (1.5 s or less). Another warlock's is ready until a use is seen, then for 1800 s from that use it is not.

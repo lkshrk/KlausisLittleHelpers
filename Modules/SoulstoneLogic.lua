@@ -74,15 +74,21 @@ local function IsReady(member, snap)
     return snap.tracker == nil or snap.tracker:Ready(member.guid, snap.now)
 end
 
+--- Returns the reminder, or nil and why nothing is shown.
 function Soulstone.Evaluate(snap)
-    if not InstanceAllowed(snap.instance, snap.allowed) or snap.inCombat then return nil end
+    if snap.instance ~= "party" and snap.instance ~= "raid" then return nil, "not in a dungeon or raid" end
+    if not InstanceAllowed(snap.instance, snap.allowed) then
+        return nil, (snap.instance == "raid" and "raids are switched off in the settings" or "dungeons are switched off in the settings")
+    end
+    if snap.inCombat then return nil, "in combat" end
     local rez, healer, ready, readyMembers = nil, nil, {}, {}
     local selfWarlock = false
     for _, m in ipairs(snap.members or {}) do
-        local online = m.connected ~= false
+        local online = m.connected ~= false and not m.elsewhere
         local rezLevel = online and Soulstone.REZ_LEVEL[m.class]
         if rezLevel and AtLeast(m, rezLevel) then
-            if m.visible == false or m.hasStone then return nil end
+            if m.visible == false then return nil, m.name .. " is too far away to check for a soulstone" end
+            if m.hasStone then return nil, m.name .. " already has a soulstone" end
             rez = rez or m.name
             if m.isHealer and not healer then healer = m.name end
         elseif online and m.class == "WARLOCK" and AtLeast(m, Soulstone.WARLOCK_LEVEL) and IsReady(m, snap) then
@@ -91,7 +97,8 @@ function Soulstone.Evaluate(snap)
             if m.guid == snap.player then selfWarlock = true end
         end
     end
-    if not rez or #ready == 0 then return nil end
+    if not rez then return nil, "no priest, paladin, shaman or druid who can resurrect" end
+    if #ready == 0 then return nil, "no warlock with a ready soulstone" end
     local suggest = healer or rez
     local names = table.concat(ready, ", ")
     local whispers = {}

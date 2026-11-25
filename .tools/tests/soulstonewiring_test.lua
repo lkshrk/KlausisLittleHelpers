@@ -1,4 +1,4 @@
-local names = { "CreateFrame", "C_Timer", "UIParent", "IsInInstance", "IsInGroup", "IsInRaid", "GetNumGroupMembers",
+local names = { "CreateFrame", "C_Timer", "UIParent", "IsInInstance", "IsInGroup", "IsInRaid", "GetNumGroupMembers", "GetRaidRosterInfo",
     "UnitExists", "UnitGUID", "UnitName", "UnitClass", "UnitLevel", "UnitIsConnected", "UnitIsVisible", "UnitGroupRolesAssigned",
     "UnitAffectingCombat", "UnitIsDeadOrGhost", "IsEncounterInProgress", "C_UnitAuras", "InCombatLockdown", "GetTime",
     "C_Item", "C_Container", "C_ChatInfo", "SendChatMessage", "PlaySound", "SOUNDKIT", "C_CombatLog",
@@ -102,6 +102,14 @@ _G.UnitClass = function(u) return roster[u] and roster[u].class, roster[u] and r
 _G.UnitLevel = function(u) return roster[u] and roster[u].level end
 _G.UnitIsConnected = function(u) return roster[u] ~= nil and roster[u].offline ~= true end
 _G.UnitIsVisible = function(u) return roster[u] ~= nil and roster[u].far ~= true end
+_G.GetRaidRosterInfo = function(i)
+    local units = {}
+    for unit in pairs(roster) do units[#units + 1] = unit end
+    table.sort(units)
+    local r = roster[units[i - 1]]
+    if i == 1 or not r then return nil, 0, 1 end
+    return r.name, 0, 1, r.level, r.class, r.class, r.zone or "Blackrock Spire", r.offline ~= true
+end
 _G.UnitGroupRolesAssigned = function() return "NONE" end
 _G.UnitAffectingCombat = function(u) return roster[u] ~= nil and roster[u].combat == true end
 _G.UnitIsDeadOrGhost = function() return dead end
@@ -284,6 +292,10 @@ local good, problem = pcall(function()
     Fire("GROUP_ROSTER_UPDATE")
     Settle()
     eq(banner.shown, false, "unseen rez member: unknown, show nothing")
+    roster.party2.zone = "Orgrimmar"
+    Fire("GROUP_ROSTER_UPDATE")
+    Settle()
+    ok(banner.shown, "rez member outside the instance: assumed without a soulstone")
     roster.party2 = nil
     Fire("GROUP_ROSTER_UPDATE")
     Settle()

@@ -159,9 +159,25 @@ local function OwnStoneReady()
     return false
 end
 
+--- Zone of each group member by name from the raid roster, whose slots can have gaps; empty where the client gives none.
+local function RosterZones()
+    local zones = {}
+    local roster = _G.GetRaidRosterInfo
+    if not roster then return zones end
+    for i = 1, _G.MAX_RAID_MEMBERS or 40 do
+        local name, _, _, _, _, _, zone = roster(i)
+        name, zone = Plain(name, "string"), Plain(zone, "string")
+        if name and zone and zone ~= "" then zones[name] = zone end
+    end
+    return zones
+end
+
 local function Snapshot()
     local playerGUID = _G.UnitGUID and Plain(_G.UnitGUID("player"), "string")
     local members = {}
+    local zones = RosterZones()
+    local myName = FullName("player")
+    local myZone = myName and zones[myName]
     for _, unit in ipairs(GroupUnits()) do
         local exists = _G.UnitExists and _G.UnitExists(unit)
         local guid = exists and _G.UnitGUID and Plain(_G.UnitGUID(unit), "string")
@@ -176,6 +192,8 @@ local function Snapshot()
                 visible = _G.UnitIsVisible and Plain(_G.UnitIsVisible(unit), "boolean"),
             }
             if guid == playerGUID and class == "WARLOCK" then member.ownReady = OwnStoneReady() end
+            member.zone = zones[name]
+            member.elsewhere = myZone ~= nil and member.zone ~= nil and member.zone ~= myZone
             members[#members + 1] = member
         end
     end
@@ -463,6 +481,39 @@ local function ToggleTest()
     end
 end
 
+local function MemberLine(m, snap)
+    local level = m.level and (" " .. m.level) or ""
+    local state
+    if m.class == "WARLOCK" then
+        local ready = m.guid == snap.player and m.ownReady or (m.guid ~= snap.player and tracker:Ready(m.guid, snap.now))
+        state = ready and "soulstone ready" or "soulstone on cooldown or not in bags"
+    else
+        state = (m.visible == false and "too far away" or "in range") .. ", " .. (m.hasStone and "has a soulstone" or "no soulstone")
+    end
+    if m.elsewhere then state = "outside the instance (" .. m.zone .. "), counts as no soulstone" end
+    if m.connected == false then state = "offline" end
+    return ("  %s (%s%s): %s"):format(m.name, m.class:lower(), level, state)
+end
+
+local function Explain()
+    if not running then
+        ns.Print("Soulstone Reminder is off.")
+        return
+    end
+    local snap = Snapshot()
+    local result, reason = ns.Soulstone.Evaluate(snap)
+    if result then
+        ns.Print(("Soulstone Reminder would show now (%s): %s"):format(snap.instance, result.announce))
+    else
+        ns.Print(("Soulstone Reminder shows nothing (%s): %s."):format(snap.instance, reason or "unknown"))
+    end
+    for _, m in ipairs(snap.members) do
+        if ns.Soulstone.REZ_LEVEL[m.class] or m.class == "WARLOCK" then ns.Print(MemberLine(m, snap)) end
+    end
+end
+
+local commandRegistered
+
 local function NextTrigger(kind)
     triggerCount = triggerCount + 1
     return kind .. triggerCount
@@ -539,7 +590,8 @@ ns.RegisterFeature({
     tab = "qol",
     section = "Dungeons & Raids",
     description = "Reminder for Soulstone recovery in instances and raids.",
-    help = "Reminder for Soulstone recovery in instances and raids.",
+    help = "Reminder for Soulstone recovery in instances and raids. /klh soulstone says why it shows or doesn't show right now.",
+    commands = { "soulstone" },
     defaults = { instances = "both", banner = true, announce = false, whisper = false, sound = false },
     enable = function()
         if not _G.CreateFrame then return end
@@ -560,6 +612,10 @@ ns.RegisterFeature({
         if commsReady then eventFrame:RegisterEvent("CHAT_MSG_ADDON") end
         running = true
         helloWanted = true
+        if not commandRegistered and ns.RegisterSlashCommand then
+            commandRegistered = true
+            ns.RegisterSlashCommand("soulstone", Explain)
+        end
         QueueRefresh()
     end,
     disable = function()

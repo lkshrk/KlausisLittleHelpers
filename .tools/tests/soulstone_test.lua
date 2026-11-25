@@ -201,3 +201,41 @@ peers:Seen("Player-1-A", 50)
 ok(peers:Elected("Player-1-B", 401), "stale peer pruned, older sighting does not revive it")
 peers:Seen(nil, 500)
 ok(peers:Elected("Player-1-B", 500), "nil id ignored")
+
+do
+    local function why(over)
+        local result, reason = S.Evaluate(Snap(over))
+        return result, reason
+    end
+    local _, reason = why({ instance = "none" })
+    ok(reason and reason:find("not in a dungeon or raid", 1, true), "reason: outside: " .. tostring(reason))
+    _, reason = why({ instance = "raid", allowed = "party" })
+    ok(reason and reason:find("raids are switched off", 1, true), "reason: raid not allowed: " .. tostring(reason))
+    _, reason = why({ inCombat = true })
+    ok(reason and reason:find("combat", 1, true), "reason: combat: " .. tostring(reason))
+    _, reason = why({ members = { Member("me", "Anduin", "PRIEST", { visible = false }), Member("w1", "Gul'dan", "WARLOCK") } })
+    ok(reason and reason:find("Anduin is too far away", 1, true), "reason: out of range: " .. tostring(reason))
+    _, reason = why({ members = { Member("me", "Anduin", "PRIEST", { hasStone = true }), Member("w1", "Gul'dan", "WARLOCK") } })
+    ok(reason and reason:find("Anduin already has a soulstone", 1, true), "reason: has stone: " .. tostring(reason))
+    _, reason = why({ members = { Member("w1", "Gul'dan", "WARLOCK") } })
+    ok(reason and reason:find("no priest, paladin, shaman or druid", 1, true), "reason: no healer class: " .. tostring(reason))
+    _, reason = why({ members = { Member("me", "Anduin", "PRIEST") } })
+    ok(reason and reason:find("no warlock with a ready soulstone", 1, true), "reason: no ready warlock: " .. tostring(reason))
+    local shown, none = why()
+    ok(shown ~= nil and none == nil, "no reason when it shows")
+end
+
+do
+    local result = S.Evaluate(Snap({ members = {
+        Member("me", "Anduin", "PRIEST"),
+        Member("p2", "Uther", "PALADIN", { visible = false, elsewhere = true, hasStone = false }),
+        Member("w1", "Gul'dan", "WARLOCK"),
+    } }))
+    ok(result ~= nil, "a healer outside the instance does not block the reminder")
+    eq(result and result.suggest, "Anduin", "and is not suggested")
+    local _, reason = S.Evaluate(Snap({ members = {
+        Member("p2", "Uther", "PALADIN", { visible = false, elsewhere = true }),
+        Member("w1", "Gul'dan", "WARLOCK"),
+    } }))
+    ok(reason and reason:find("no priest, paladin, shaman or druid", 1, true), "only healer outside: no one to stone: " .. tostring(reason))
+end
