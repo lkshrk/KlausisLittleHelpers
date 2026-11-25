@@ -5,7 +5,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 major|minor|patch|vX.Y.Z" >&2
+  echo "Usage: $0 major|minor|patch|X.Y.Z" >&2
   exit 1
 }
 
@@ -72,9 +72,8 @@ commit_remaining_changes
 # Re-check origin before tagging so concurrent updates fail without leaving an unpushable tag.
 verify_release_branch_still_current
 
-CURRENT=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo "v0.0.0")
-CURRENT_CLEAN="${CURRENT#v}"
-IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_CLEAN"
+CURRENT=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo "0.0.0")
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
 VERSION=""
 case "$INPUT" in
@@ -85,15 +84,15 @@ case "$INPUT" in
   patch)
     PATCH=$((PATCH + 1)) ;;
   v[0-9]*.[0-9]*.[0-9]*)
-    VERSION="$INPUT" ;;
+    VERSION="${INPUT#v}" ;;
   [0-9]*.[0-9]*.[0-9]*)
-    VERSION="v$INPUT" ;;
+    VERSION="$INPUT" ;;
   *)
     echo "Error: unrecognised argument '$INPUT'" >&2
     usage ;;
 esac
 
-[[ -z "$VERSION" ]] && VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+[[ -z "$VERSION" ]] && VERSION="${MAJOR}.${MINOR}.${PATCH}"
 
 if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
   echo "Error: local tag ${VERSION} already exists." >&2

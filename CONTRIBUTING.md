@@ -40,7 +40,7 @@ scripts/errors.sh [retail|forever] [pattern] [--all-sessions]   # read !BugGrabb
 ## Release
 
 ```sh
-scripts/release.sh patch|minor|major   # tags vX.Y.Z and pushes branch and tag
+scripts/release.sh patch|minor|major   # tags X.Y.Z (no v prefix) and pushes branch and tag
 ```
 
 The release workflow packages the tag with the BigWigs packager once CI passes on that commit. The TOC keeps `## Version: @project-version@`; the packager fills it from the tag, and `scripts/sync.sh` writes the `git describe` version (or `dev-<sha>` before the first tag, `-dirty` with uncommitted changes) into the copied TOC.

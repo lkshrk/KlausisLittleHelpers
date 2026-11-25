@@ -31,7 +31,7 @@ done < <(sed -n '/^ignore:/,/^[^[:space:]-]/s/^[[:space:]]*-[[:space:]]*//p' .pk
 
 dev_version() {
     local v
-    if v=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --dirty 2>/dev/null); then
+    if v=$(git describe --tags --match '[0-9]*.[0-9]*.[0-9]*' --dirty 2>/dev/null); then
         echo "$v"
         return
     fi

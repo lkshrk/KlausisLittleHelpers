@@ -41,7 +41,7 @@ body:
     attributes:
       label: Addon version
       description: Type /klh in game, the version is at the top of the General tab. The CurseForge or Wago app shows it too. Not sure? Leave it empty.
-      placeholder: "e.g. v0.3.1"
+      placeholder: "e.g. 0.3.1"
 
   - type: textarea
     id: what

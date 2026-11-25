@@ -23,7 +23,7 @@ graph LR
     CK --> CT[".tools/check-toc.lua"]
     CI["check.yml"] --> CK
     CI --> PK["BigWigs packager -d"]
-    REL["scripts/release.sh"] -->|"tag vX.Y.Z"| RW["release.yml"]
+    REL["scripts/release.sh"] -->|"tag X.Y.Z"| RW["release.yml"]
     RW --> PK2["BigWigs packager"]
 ```
 
@@ -66,7 +66,7 @@ Steps, all run even after a failure:
 - `WOW_DIR` (default `/mnt/stuff/Games/World of Warcraft`) holds `_retail_` and `_forever_`. The target is `<WOW_DIR>/<flavor>/Interface/AddOns/KlausisLittleHelpers`.
 - Exclusions: every dotfile, `*.zip`, and each path in the `.pkgmeta` `ignore:` list (read with `sed`).
 - `rsync -a --delete --delete-excluded --itemize-changes`.
-- **Version token**: the TOC contains `## Version: @project-version@`. The BigWigs packager fills it at release time. `sync.sh` fills it for the local copy only: `git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --dirty` if there is a tag, else `dev-<short sha>` with `-dirty` when the tree differs from `HEAD`. It runs `sed -i` on the copied TOC, never on the repository file.
+- **Version token**: the TOC contains `## Version: @project-version@`. The BigWigs packager fills it at release time. `sync.sh` fills it for the local copy only: `git describe --tags --match '[0-9]*.[0-9]*.[0-9]*' --dirty` if there is a tag, else `dev-<short sha>` with `-dirty` when the tree differs from `HEAD`. It runs `sed -i` on the copied TOC, never on the repository file.
 - A dry run changes nothing and prints "would be version X".
 - Afterwards the player types `/reload` in game.
 
@@ -78,11 +78,11 @@ Finds `<WOW_DIR>/<flavor>/WTF/Account/*/SavedVariables/!BugGrabber.lua` and runs
 
 `update` clones or refreshes `https://github.com/Gethe/wow-ui-source` (branches `live` and `forever`, depth 1) into `~/.local/share/wow/` (override with `WOW_UI_SOURCE`), and `https://github.com/Ketho/vscode-wow-api` into `~/.local/share/wow/vscode-wow-api`, whose `Annotations` folder `.luarc.json` uses for WoW globals. `grep` searches `*.lua` and `*.xml` under `Interface/` and shows the first 200 hits.
 
-### `scripts/release.sh major|minor|patch|vX.Y.Z`
+### `scripts/release.sh major|minor|patch|X.Y.Z`
 
 1. Must be on a branch. Pulls fast-forward only when the tree is clean, else checks that the branch is not behind `origin`.
 2. Offers to commit remaining changes as a release prep commit (default message "chore: prepare release").
-3. Re-checks `origin` and computes the next version from the latest `vX.Y.Z` tag (starting at `v0.0.0`). Refuses an existing local or remote tag.
+3. Re-checks `origin` and computes the next version from the latest `X.Y.Z` tag (SemVer without a `v` prefix, starting at `0.0.0`; a `v` given on the command line is dropped). Refuses an existing local or remote tag.
 4. Asks for confirmation, creates an annotated tag, and pushes the branch and the tag.
 5. It prints the Actions URL. The workflow publishes later.
 
@@ -99,9 +99,9 @@ Actions are pinned by commit SHA.
 
 ### `release.yml` (name `release`)
 
-Triggers: `workflow_run` of `check` completed, a pushed tag `vX.Y.Z`, manual. Runs are serialized (`concurrency: release`, no cancel).
+Triggers: `workflow_run` of `check` completed, a pushed tag `X.Y.Z`, manual. Runs are serialized (`concurrency: release`, no cancel).
 
-- Job `gate`: runs for a successful `push` check run (or any tag or manual run). It finds the latest `check` run for the commit through `gh api` and requires `completed` and `success`. If CI is still running it defers to the later `workflow_run` trigger (except for manual runs). It then looks for a `vX.Y.Z` tag on `HEAD`, and skips if no tag exists or a GitHub release for it already exists.
+- Job `gate`: runs for a successful `push` check run (or any tag or manual run). It finds the latest `check` run for the commit through `gh api` and requires `completed` and `success`. If CI is still running it defers to the later `workflow_run` trigger (except for manual runs). It then looks for an `X.Y.Z` tag on `HEAD`, and skips if no tag exists or a GitHub release for it already exists.
 - Job `release`: runs only when `gate` found a tag. It uses the `release` environment, `contents: write`, and the BigWigs packager with the secrets `CF_API_KEY`, `WOWI_API_TOKEN`, `WAGO_API_TOKEN` and `GITHUB_OAUTH` (the GitHub token).
 
 ### `lefthook.yml`
