@@ -7,8 +7,9 @@ Small helpers for questing, routes and professions. Runs on retail and WoW Forev
 - TustUI Enhanced XP Bar: session XP and XP/hour on TustUI's XP bar (retail and Forever).
 - RestedXP Quest Sync: keeps your quest tracker on the current RestedXP guide (Forever).
 - Turn-in Route: plans the fastest route to every ready turn-in (Forever).
-- Writ & Crate Planner: cheapest writs, crates and delivery receipts for a rep or Merchant's Favor target from Auctionator prices, plus macros to apply receipts and fill crates (Forever).
+- Writ & Crate Planner: cheapest writs, crates and delivery receipts for a rep or Merchant's Favor target from Auctionator prices with a price check against the usual price from its history, plus macros to apply receipts and fill crates (Forever).
 - Soulstone Reminder: warns in dungeons and raids when a warlock's soulstone is ready and no healer has one (Forever).
+- Layer Change Prompt: moves Blizzard's "you will be moved to another layer" prompt where you want it and keeps it on top of other frames (Forever).
 
 Open it with `/klh`.
 

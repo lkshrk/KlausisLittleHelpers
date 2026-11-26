@@ -39,7 +39,7 @@ graph LR
 | `scripts/release.sh` | Tags and pushes a release. |
 | `scripts/taxi-data.py`, `scripts/writ-data.py` | Data generators (see [Data and Generators](<Data and Generators.md>)). |
 | `.tools/check-toc.lua`, `.tools/errors.lua` | Lua helpers for `check.sh` and `errors.sh`. |
-| `.tools/tests/run.lua` and 33 `*_test.lua` files | Test runner and tests. |
+| `.tools/tests/run.lua` and 42 `*_test.lua` files | Test runner and tests. |
 | `.luarc.json` | LuaLS settings: Lua 5.1, the addon and test globals, and `~/.local/share/wow/vscode-wow-api/Annotations` as library. |
 | `lefthook.yml` | Git hooks. |
 | `.github/workflows/check.yml`, `release.yml` | CI and release. |
@@ -115,7 +115,7 @@ Run `lefthook install` once per clone. Do not skip hooks with `--no-verify` (pro
 
 - **Lint config**: `.luacheckrc` excludes `Libs/**` and `.release/**`, sets `max_line_length = false`, `unused_args = false`. Read-only WoW globals are listed, and the addon's own globals are `KLH`, `KLH_DB`, `KLH_CharDB`, `SlashCmdList`, `SLASH_KLH1..3`. Test files may use `eq`, `ok`, `find`, `has`, `addon` and the global `ns`.
 - **Why tests stub globals**: tests that touch game APIs save the globals they replace and restore them at the end, because each test file runs in an environment that falls back to `_G`.
-- **Test inventory** (33 files), by area: Core (`core`, `slash`, `options`, `settingsentry`, `ui`, `listwindow`, `livefeature`), routes (`routegraph`, `routeheap`, `routeopts`, `routeplanner`, `routewiring`, `routeevents`, `routequestie`, `turnin`, `teleports`), writs (`cover`, `plan`, `tiebreak`, `candidates`, `observe`, `planner`, `plannerevents`, `writlearner`), RestedXP Quest Sync (`questsync`, `questsynccap`), Soulstone Reminder (`soulstone`, `soulstonewiring`, `soulstonecomms`), TustUI XP bar (`xpbar`), data (`data`, `retaildata`), structure (`standalone`).
+- **Test inventory** (42 files), by area: Core (`core`, `slash`, `options`, `settingsentry`, `ui`, `listwindow`, `livefeature`), routes (`routegraph`, `routeheap`, `routeopts`, `routeplanner`, `routewiring`, `routeevents`, `routequestie`, `routedraw`, `turnin`, `teleports`), writs (`cover`, `plan`, `tiebreak`, `candidates`, `observe`, `planner`, `plannerevents`, `writlearner`, `optimal`, `writdepth`, `writdepthqueue`, `writdepthwiring`, `writuse`, `writhistory`, `pricecheck`), RestedXP Quest Sync (`questsync`, `questsynccap`), Soulstone Reminder (`soulstone`, `soulstonewiring`, `soulstonecomms`), Layer Change Prompt (`layerprompt`), TustUI XP bar (`xpbar`), data (`data`, `retaildata`), structure (`standalone`).
 - `standalone_test.lua` reads the TOC and fails if any Core, Modules or Data file mentions `EllesmereUI`, `EUI.` or `EUI_CLIENT_BLOCKED`, except `Modules/TustUIXPBar.lua`.
 - `renovate.json5` configures dependency updates.
 

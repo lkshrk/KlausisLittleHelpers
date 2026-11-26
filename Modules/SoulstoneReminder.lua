@@ -590,7 +590,7 @@ ns.RegisterFeature({
     tab = "qol",
     section = "Dungeons & Raids",
     description = "Reminder for Soulstone recovery in instances and raids.",
-    help = "Reminder for Soulstone recovery in instances and raids. /klh soulstone says why it shows or doesn't show right now.",
+    help = "Warns in dungeons and raids when a warlock's soulstone is ready and no healer has one. /klh soulstone explains why it shows or not right now.",
     commands = { "soulstone" },
     defaults = { instances = "both", banner = true, announce = false, whisper = false, sound = false },
     enable = function()

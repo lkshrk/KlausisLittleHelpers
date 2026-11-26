@@ -11,6 +11,9 @@ local BUTTON_H = 22
 local MAX_HEIGHT_FRACTION = 0.6
 local MIN_VIEW_H = 40
 local WHEEL_STEP = 40
+local ICON_SIZE = 12
+local ICON_GAP = 3
+local EXTRA_GAP = 8
 
 local function PaintButton(b, hover)
     local r, g, bl = UI.Accent()
@@ -217,17 +220,34 @@ function Window:NewRow(parent)
     row.sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", PAD - 2, -2)
     row.sel:Hide()
     row.text = UI.Font(row, 12, 1, 1, 1)
+    if _G.ChatFontNormal then row.text:SetFontObject(_G.ChatFontNormal) end
     row.text:SetJustifyH("LEFT")
     row.text:SetSpacing(2)
     row.right = UI.Font(row, 12, 1, 1, 1)
+    if _G.PriceFont then row.right:SetFontObject(_G.PriceFont) end
+    row.right:SetTextColor(1, 1, 1)
     row.right:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -ROW_PAD)
     row.right:SetJustifyH("RIGHT")
     row.right:SetWordWrap(false)
+    row.extra = UI.Font(row, 12, 0.62, 0.62, 0.62)
+    if _G.PriceFont then row.extra:SetFontObject(_G.PriceFont) end
+    row.extra:SetTextColor(0.62, 0.62, 0.62)
+    row.extra:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -ROW_PAD)
+    row.extra:SetJustifyH("RIGHT")
+    row.extra:SetWordWrap(false)
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    row.icon:SetPoint("RIGHT", row.right, "LEFT", -ICON_GAP, 0)
+    row.icon:Hide()
     row.window = self
     row:SetScript("OnClick", OnRowClick)
     row:SetScript("OnEnter", function(r)
         if r.tooltipLines then
             UI.ShowLinesTooltip(r, r.tooltipLines)
+            return
+        end
+        if r.itemID and UI.ShowItemTooltip then
+            UI.ShowItemTooltip(r, r.itemID, r.tooltip)
             return
         end
         local tip = r.tooltip or self.hint
@@ -248,10 +268,23 @@ function Window:PinRow(i)
     return self.pinRows[i]
 end
 
+local function PlaceRight(row, extraCol)
+    local shift = extraCol > 0 and extraCol + EXTRA_GAP or 0
+    row.right:ClearAllPoints()
+    row.right:SetPoint("TOPRIGHT", row, "TOPRIGHT", -shift, -ROW_PAD)
+    if not row.hasRight then return 0 end
+    return (row.moneyW or 0) + shift + PAD
+end
+
+local function Measure(region)
+    return region and math.ceil(region:GetStringWidth() or 0) or 0
+end
+
 local function FillRow(row, entry, textW)
     row.data = entry.data
     row.tooltip = entry.tooltip
     row.tooltipLines = entry.tooltipLines
+    row.itemID = entry.itemID
     if entry.selected then
         local r, g, b = UI.Accent()
         row.sel:SetColorTexture(r, g, b, 0.18)
@@ -272,6 +305,9 @@ local function FillRow(row, entry, textW)
     row.text:ClearAllPoints()
     if entry.button then
         row.right:SetText("")
+        if row.extra then row.extra:SetText("") end
+        row.moneyW, row.extraW, row.rightW, row.hasIcon, row.hasRight = 0, 0, 0, false, false
+        row.icon:Hide()
         row.text:SetPoint("CENTER")
         row.text:SetWidth(textW)
         row.text:SetJustifyH("CENTER")
@@ -281,16 +317,64 @@ local function FillRow(row, entry, textW)
     end
     local indent = entry.indent and INDENT or 0
     row.right:SetText(entry.right or "")
-    local rightW = entry.right and (math.ceil(row.right:GetStringWidth()) + PAD) or 0
+    if row.extra then row.extra:SetText(entry.extra or "") end
+    row.hasRight = entry.right ~= nil or entry.extra ~= nil
+    row.moneyW, row.extraW = Measure(row.right), Measure(row.extra)
+    local rightW = PlaceRight(row, row.extraW)
+    local icon = entry.icon
+    row.rightW, row.indent, row.textW, row.hasIcon = rightW, indent, textW, icon ~= nil
+    if icon then
+        row.icon:SetTexture(icon.file)
+        row.icon:SetVertexColor(icon.r, icon.g, icon.b)
+        row.icon:Show()
+        rightW = rightW + ICON_SIZE + ICON_GAP
+    else
+        row.icon:Hide()
+    end
     row.text:SetPoint("TOPLEFT", row, "TOPLEFT", indent, -ROW_PAD)
     row.text:SetWidth(textW - indent - rightW)
     row.text:SetJustifyH("LEFT")
-    row.text:SetWordWrap(not entry.right)
+    row.text:SetWordWrap(not (entry.right or entry.extra))
     row.text:SetText(entry.text)
     return row.text:GetStringHeight() + ROW_PAD * 2
 end
 
---- entries: { text, right?, header?, indent?, selected?, button?, data, tooltip?, tooltipLines? }; pinned rows sit above the scroll.
+ns.ListWindowFillRow = FillRow
+
+-- Widths are measured here, after every fill, since a font can report 0 while it is still loading.
+local function AlignIcons(...)
+    local rows = {}
+    for i = 1, select("#", ...) do
+        for _, row in ipairs((select(i, ...))) do rows[#rows + 1] = row end
+    end
+    local extraCol = 0
+    for _, row in ipairs(rows) do
+        if row.hasRight then
+            row.moneyW, row.extraW = Measure(row.right), Measure(row.extra)
+            if row.extraW > extraCol then extraCol = row.extraW end
+        end
+    end
+    for _, row in ipairs(rows) do
+        if row.hasRight then
+            row.rightW = PlaceRight(row, extraCol)
+            row.text:SetWidth(row.textW - row.indent - row.rightW)
+        end
+    end
+    local widest = 0
+    for _, row in ipairs(rows) do
+        if row.hasIcon and row.rightW > widest then widest = row.rightW end
+    end
+    for _, row in ipairs(rows) do
+        if row.hasIcon then
+            row.icon:ClearAllPoints()
+            row.icon:SetPoint("RIGHT", row.right, "LEFT", -(ICON_GAP + widest - row.rightW), 0)
+            row.text:SetWidth(row.textW - row.indent - widest - ICON_SIZE - ICON_GAP)
+        end
+    end
+end
+
+ns.ListWindowAlignIcons = AlignIcons
+
 function Window:SetEntries(entries, summary, pinned)
     if #entries == 0 and not summary and not pinned then
         self:Hide()
@@ -322,8 +406,10 @@ function Window:SetEntries(entries, summary, pinned)
     end
     local textW = self.width - PAD * 2
     local pins = pinned or {}
+    local pinRows, listRows = {}, {}
     for i, entry in ipairs(pins) do
         local row = self:PinRow(i)
+        pinRows[i] = row
         local h = FillRow(row, entry, textW)
         row:SetHeight(h)
         row:ClearAllPoints()
@@ -348,6 +434,7 @@ function Window:SetEntries(entries, summary, pinned)
             heights[#heights + 1] = HEADER_GAP - ROW_GAP
             y = y - HEADER_GAP
         end
+        listRows[i] = row
         local h = FillRow(row, entry, textW)
         row:SetHeight(h)
         row:ClearAllPoints()
@@ -357,6 +444,7 @@ function Window:SetEntries(entries, summary, pinned)
         y = y - h - ROW_GAP
     end
     for i = #entries + 1, #self.rows do self.rows[i]:Hide() end
+    AlignIcons(pinRows, listRows)
     local actionsH = self.buttonFrames and (BUTTON_H + ROW_GAP) or 0
     local chrome = scrollTop + actionsH + PAD - ROW_GAP
     local height, needsScroll = ns.ListWindowLayout(heights, chrome, self.fixedH or MaxHeight())

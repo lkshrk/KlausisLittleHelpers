@@ -59,7 +59,7 @@ classDiagram
 - **`Core/Skin.lua`**: the optional EllesmereUI skin (`UI.Accent` override, `UI.Skinned`, `UI.SkinWindow`, `UI.SkinButton`, `UI.SkinEditBox`, `UI.SkinPanel`, `UI.SkinCloseButton`).
 - **`Core/ListWindow.lua`**: `ns.CreateListWindow`, `ns.CreateWindowButton`, `ns.ListWindowLayout`.
 - **`.tools/tests/ui_test.lua`**: tests `UI.Defer`, `UI.Accent` and `UI.SetArrowTexture`.
-- **`.tools/tests/listwindow_test.lua`**: tests `ns.ListWindowLayout`.
+- **`.tools/tests/listwindow_test.lua`**: tests `ns.ListWindowLayout`, the row icon (`ns.ListWindowFillRow`) and the column alignment (`ns.ListWindowAlignIcons`).
 
 ## Public Interface
 
@@ -88,7 +88,7 @@ The returned object has `SetEntries(entries, summary, pinned)`, `SetInfo(info)`,
 
 Pure. `rowHeights` are the heights of the rows (each plus a 4 px gap), `chrome` is all fixed height around them. Returns `height, needsScroll`: the full height when it fits `maxHeight` (or `maxHeight` is nil or not positive), else `max(maxHeight, chrome + 40)` and `true`.
 
-- `entries = { { text, right?, header?, indent?, selected?, button?, data?, tooltip?, tooltipLines? }, ... }`: `right` is a right-aligned column (the left text then stays on one line), `header` rows take the accent colour and 8 px of space above, `indent` shifts the left text 10 px. `summary` is `{ text, tooltip? }`.
+- `entries = { { text, right?, icon?, header?, indent?, selected?, button?, data?, tooltip?, tooltipLines? }, ... }`: `right` is a right-aligned column (the left text then stays on one line), rows use Auctionator's fonts (`ChatFontNormal` for the text, as its item name cells, and `PriceFont` for the right column, as Blizzard's money display), so they match the auction house lists; `itemID` shows the game's item tooltip on hover (`UI.ShowItemTooltip`, with `tooltip` as a hint below it), `icon` (`{ file, r, g, b }`) is a 12 px texture tinted with `SetVertexColor`, left of the right column (a texture, since inline texture markup does not render on Forever); `extra` is a grey second column right of `right` (the planner puts rep, Favor and zone counts there); after filling, `AlignIcons` lines up the pinned rows and the list rows together: it re-measures the right and extra texts of every row that has either (`row.hasRight`, set by the fill, so a font still reporting 0 at fill time is not skipped), makes one extra column as wide as its widest entry, puts the right texts left of it on one edge, and the icons in one column left of the widest right text; a button row clears its column fields, `header` rows take the accent colour and 8 px of space above, `indent` shifts the left text 10 px. `summary` is `{ text, tooltip? }`.
 - An empty list without a summary or pinned rows hides the window.
 - `frame` is available after `Build()`. `SetEntries` builds on first use. The planner calls `Build()` itself so it can anchor the frame.
 
@@ -121,7 +121,7 @@ Pure. `rowHeights` are the heights of the rows (each plus a 4 px gap), `chrome` 
 
 ## Testing
 
-`ui_test.lua` stubs `InCombatLockdown`, `geterrorhandler` and `CreateFrame`, then checks that `UI.Defer` runs at once out of combat, queues in combat, keeps only the latest function per key, and runs on regen; it also checks `UI.Accent` and the `UI.SetArrowTexture` fallbacks. `listwindow_test.lua` covers `ns.ListWindowLayout` (fit, scroll, exact fit, no maximum, minimum viewport). The window frames and the menu have no automated test.
+`ui_test.lua` stubs `InCombatLockdown`, `geterrorhandler` and `CreateFrame`, then checks that `UI.Defer` runs at once out of combat, queues in combat, keeps only the latest function per key, and runs on regen; it also checks `UI.Accent` and the `UI.SetArrowTexture` fallbacks. `listwindow_test.lua` covers `ns.ListWindowLayout` (fit, scroll, exact fit, no maximum, minimum viewport) the row icon (shown, tinted and hidden again) and the column alignment (one edge over pinned and list rows, widths re-measured at align time, button rows left alone). The window frames and the menu have no automated test.
 
 ## Potential Improvements
 

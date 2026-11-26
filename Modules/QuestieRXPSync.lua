@@ -202,7 +202,7 @@ ns.RegisterFeature({
     title = "RestedXP Quest Sync",
     tab = "thirdparty",
     description = "Your quest tracker (Questie's, or the default one without Questie) shows the quests of your current RestedXP guide and untracks every other quest, on a guide switch, on each accepted quest and when the guide window opens. Changes nothing while the guide window is closed.",
-    help = "Keeps your quest tracker on your current RestedXP guide: the guide's quests are tracked, every other quest is untracked. Works with Questie's tracker or, without Questie, the default quest tracker, which holds up to 25 quests; the guide's next quests come first. It runs while the RestedXP guide window is open, on login, when you switch guides and when you accept a quest. Turning it on or off needs a reload.",
+    help = "Tracks the quests of your current RestedXP guide and untracks the rest, in Questie's tracker or the default one (up to 25 quests). Turning it on or off needs a reload.",
     requires = { "RXPGuides" },
     optional = { "Questie" },
     enable = function()

@@ -59,7 +59,8 @@ eq(outside[51], nil, "fetched item outside the plan with nothing listed is unbuy
 eq(D.PlanCost(cheap, {}, { [40] = {} }, scan, bundleOf), nil, "plan needing an item with nothing listed has no cost")
 eq(D.PlanCost(cheap, {}, bl, scan, bundleOf), 100, "plan cost from depth")
 eq(D.PlanCost(dear, {}, bl, scan, bundleOf), 100 + 500, "bigger buy pays the next tier")
-eq(D.PlanCost(cheap, { [40] = 10 }, bl, scan, bundleOf), 0, "owned costs nothing")
+eq(D.PlanCost(cheap, { [40] = 10 }, bl, scan, bundleOf), 100, "owned mats count at their cheapest listing")
+eq(D.PlanCost(cheap, { [40] = 4 }, bl, scan, bundleOf), 100, "partly owned: the rest is bought, the owned part valued")
 ok(D.PlanCost(cheap, {}, bl, scan, bundleOf) < D.PlanCost(dear, {}, bl, scan, bundleOf), "plan cost compare")
 
 local short = D.ShortAtScan({ [1] = 10, [2] = 5, [3] = 4 }, { [1] = 6, [2] = 5 })

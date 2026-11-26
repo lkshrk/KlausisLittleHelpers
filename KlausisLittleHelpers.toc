@@ -29,8 +29,10 @@ Modules\RouteDraw.lua
 Modules\RouteWaypoints.lua
 Modules\RoutePlanner.lua
 Modules\TurnInRoute.lua
+Modules\WritCrateHistory.lua
 Modules\WritCrateDepth.lua
 Modules\WritCrateUse.lua
 Modules\WritCratePlanner.lua
 Modules\SoulstoneLogic.lua
 Modules\SoulstoneReminder.lua
+Modules\LayerPrompt.lua

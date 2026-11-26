@@ -214,15 +214,62 @@ eq(groupCount, 1, "one section group")
 local sg = qargs[groupKey]
 ok(groupKey:find("^section_"), "section key prefixed")
 eq(sg.type, "group"); eq(sg.inline, true)
-ok(sg.args.S1 and sg.args.S2, "both sectioned features inside")
+local h1, h2 = sg.args.S1_header, sg.args.S2_header
+ok(h1 and h2, "each sectioned feature gets a header inside the section")
+eq(h1.type, "header"); eq(h1.name, "First")
+for k, v in pairs(sg.args) do ok(v.type ~= "group", "no box inside a section: " .. k) end
 eq(qargs.S1, nil); eq(qargs.S2, nil)
-ok(qargs.S0 ~= nil, "plain feature stays at tab level")
+ok(qargs.S0 ~= nil and qargs.S0.inline, "plain feature is its own box at tab level")
 ok(sg.order < qargs.S0.order, "section ordered by its first feature")
-ok(sg.args.S1.order < sg.args.S2.order, "registration order inside a section")
+ok(h1.order < h2.order, "registration order inside a section")
+local flat = {
+    F1 = { key = "F1", title = "Flat", tab = "qol", section = "Box",
+        options = function() return {
+            a = { type = "toggle", order = 2, name = "A", get = function() end, set = function() end },
+            b = { type = "toggle", order = 1, name = "B", get = function() end, set = function() end },
+        } end },
+    F2 = { key = "F2", title = "Next", tab = "qol", section = "Box", alwaysOn = true,
+        options = function() return { c = { type = "execute", order = 1, name = "C", func = function() end } } end },
+}
+ns.FEATURE_CLIENTS.F1, ns.FEATURE_CLIENTS.F2 = "all", "all"
+local tf = ns.BuildOptionsTable(flat, { "F1", "F2" }, { isForever = true, isLoaded = function() return true end })
+local box = tf.args.qol.args.section_Box.args
+ok(box.F1_header.order < box.F1_enabled.order, "header before the Enable toggle")
+ok(box.F1_enabled.order < box.F1_b.order, "Enable toggle before options")
+ok(box.F1_b.order < box.F1_a.order, "options keep their order")
+ok(box.F1_a.order < box.F2_header.order, "next feature starts after the last option")
+ok(box.F2_c ~= nil, "second feature flattened too")
 dofile("Libs/LibStub/LibStub.lua")
 dofile("Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua")
 dofile("Libs/AceConfig-3.0/AceConfigRegistry-3.0/AceConfigRegistry-3.0.lua")
 local reg = _G.LibStub("AceConfigRegistry-3.0")
 local vgood, vproblem = pcall(reg.ValidateOptionsTable, reg, ts, "ts")
 ok(vgood, tostring(vproblem))
+_G.LibStub = nil
+
+local function FakeFrame()
+    local f = { hooks = {}, textures = {} }
+    f.CreateTexture = function()
+        local tex = { shown = true }
+        tex.SetColorTexture = function(tx, _, _, _, alpha) tx.alpha = alpha end
+        tex.SetPoint = function() end
+        tex.Show = function(tx) tx.shown = true end
+        tex.Hide = function(tx) tx.shown = false end
+        f.textures[#f.textures + 1] = tex
+        return tex
+    end
+    f.HookScript = function(frame, name, hook) frame.hooks[name] = hook end
+    return f
+end
+local pooled = FakeFrame()
+local dialog = { OpenFrames = {} }
+function dialog:Open(id) self.OpenFrames[id] = { frame = pooled } end
+_G.LibStub = function(name) if name == "AceConfigDialog-3.0" then return dialog end end
+ns.OpenOptions()
+eq(#pooled.textures, 1, "adds one background")
+ok(pooled.textures[1].shown and pooled.textures[1].alpha > 0.9, "opaque while open")
+pooled.hooks.OnHide(pooled)
+eq(pooled.textures[1].shown, false, "hidden when the window closes, for other addons reusing the frame")
+ns.OpenOptions()
+eq(#pooled.textures, 1, "reopening reuses it"); eq(pooled.textures[1].shown, true)
 _G.LibStub = nil

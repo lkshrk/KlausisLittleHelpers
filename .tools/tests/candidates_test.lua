@@ -7,7 +7,7 @@ ok(#c.unpriced > 0, "unpriced writs listed, not priced at 0")
 base.doneToday[94289] = true; c = ns.WritState.BuildCandidates(base)
 ok(not has(c.writs, "ref", nil, function(x) return x.ref.questID == 94289 end), "done today excluded")
 base.doneToday = {}; base.owned[10498] = 1; c = ns.WritState.BuildCandidates(base)
-eq(find(c.writs, "ref", nil, function(x) return x.ref.questID == 94289 end).cost, 2000)
+eq(find(c.writs, "ref", nil, function(x) return x.ref.questID == 94289 end).cost, 4398, "an owned item still costs its AH price")
 local hordeOnly; for _, row in ipairs(ns.Data.Writs) do if row.friendly == "H" then hordeOnly = row break end end
 if hordeOnly then
     base.prices[hordeOnly.writID] = 100; base.prices[hordeOnly.itemID] = 100
@@ -42,8 +42,11 @@ base.onQuest = nil; base.prices[264089] = 2000
 
 local multi = { Writs = { { questID = 1, writID = 10, itemID = 11, name = "X", item = "X", qty = 3, rep = 125 } }, WaylaidCrates = {} }
 local mb = { data = multi, prices = { [10] = 5, [11] = 100 }, owned = { [11] = 2 }, doneToday = {} }
-eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 105, "partly owned item costs the missing part")
-mb.owned[11] = 3; eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 5)
+eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 305, "partly owned items count at full value")
+mb.owned[11] = 3; eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 305, "fully owned items too")
+mb.prices[11] = nil; eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 5, "owned but unpriced item is free, not unplannable")
+mb.owned[11] = 2; ok(not ns.WritState.BuildCandidates(mb).writs[1], "short and unpriced is unpriced")
+mb.prices[11] = 100
 mb.owned[11] = 0; eq(ns.WritState.BuildCandidates(mb).writs[1].cost, 305)
 
 local W = ns.WritState

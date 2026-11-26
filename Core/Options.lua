@@ -98,6 +98,16 @@ local function FeatureGroup(spec, index, ctx)
     }, requires
 end
 
+-- AceConfigDialog boxes every inline group, so a section holds its features flat behind a header.
+local function AddToSection(holder, key, index, group)
+    local base = index * 1000
+    holder.args[key .. "_header"] = { type = "header", order = base, name = group.name }
+    for argKey, arg in pairs(group.args) do
+        arg.order = base + 1 + (type(arg.order) == "number" and arg.order or 0) * 10
+        holder.args[key .. "_" .. argKey] = arg
+    end
+end
+
 local TABS = {
     { key = "qol", name = "QoL" },
     { key = "helpers", name = "Helpers" },
@@ -140,7 +150,7 @@ function ns.BuildOptionsTable(features, order, ctx)
                     holder = { type = "group", inline = true, order = index, name = name, args = {} }
                     sections[tab][sectionKey] = holder
                 end
-                holder.args[key] = group
+                AddToSection(holder, key, index, group)
             else
                 sections[tab][key] = group
             end
@@ -179,8 +189,26 @@ function ns.CloseOptions()
     end
 end
 
+-- AceGUI pools its Frame widget for every addon, so the backdrop only shows while ours is open.
+local function OpaqueBackground(dialog)
+    local widget = dialog.OpenFrames and dialog.OpenFrames[ns.ID]
+    local frame = widget and widget.frame
+    if not (frame and frame.CreateTexture) then return end
+    if not frame.klhBackground then
+        local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+        bg:SetColorTexture(0.06, 0.06, 0.07, 0.97)
+        bg:SetPoint("TOPLEFT", 8, -8)
+        bg:SetPoint("BOTTOMRIGHT", -8, 8)
+        frame.klhBackground = bg
+        frame:HookScript("OnHide", function(self) self.klhBackground:Hide() end)
+    end
+    frame.klhBackground:Show()
+end
+
 function ns.OpenOptions()
-    _G.LibStub("AceConfigDialog-3.0"):Open(ns.ID)
+    local dialog = _G.LibStub("AceConfigDialog-3.0")
+    dialog:Open(ns.ID)
+    OpaqueBackground(dialog)
 end
 
 local function RegisterReloadPopup()

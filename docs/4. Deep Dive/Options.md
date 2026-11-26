@@ -2,11 +2,11 @@
 
 ## Overview
 
-`Core/Options.lua` turns the feature registry into an AceConfig options tree, opens it with AceConfigDialog, and adds an entry to the Blizzard AddOns settings. The window is a tab group; each feature is an inline section in its tab. Sections of features whose required addons are missing are shown greyed with a "Requires" line.
+`Core/Options.lua` turns the feature registry into an AceConfig options tree, opens it with AceConfigDialog, and adds an entry to the Blizzard AddOns settings. The window is a tab group; each feature is a box in its tab, or a header line inside its section's box. Features whose required addons are missing are shown greyed with a "Requires" line.
 
 ## Responsibilities
 
-- Build the tabs (General, QoL, Helpers, 3rd Party, Profiles) and one inline section per feature, placed by `spec.tab` and grouped by `spec.section`; empty tabs are omitted. Each section starts with the feature's `help` text.
+- Build the tabs (General, QoL, Helpers, 3rd Party, Profiles) and one box per feature or per `spec.section`, placed by `spec.tab`; empty tabs are omitted. Each feature starts with its `help` text, kept to one or two sentences.
 - Grey out and annotate gated features.
 - Add an Enable toggle for features that are not `alwaysOn`. There is no per-feature Reset; resetting is the Profiles tab's "Reset Profile".
 - Switch a feature with `disable` live through `ns.ApplyFeature`; ask for a reload when any other switchable feature changes.
@@ -60,7 +60,9 @@ Features keep registration (TOC) order inside a tab.
 
 ### Sections
 
-A feature may set `section` (a string). Features of one tab with the same `section` go into one inline group `{ type = "group", inline = true, name = <section> }` keyed `"section_" .. <section with non-alphanumerics removed>`, whose order is the index of its first feature. Features without `section` stay direct children of the tab. The QoL tab groups the Soulstone Reminder under "Dungeons & Raids".
+A feature may set `section` (a string). Features of one tab with the same `section` go into one inline group `{ type = "group", inline = true, name = <section> }` keyed `"section_" .. <section with non-alphanumerics removed>`, whose order is the index of its first feature. AceConfigDialog draws every inline group as a box, so a sectioned feature is not nested as a group: `AddToSection` adds a `header` (`<key>_header`, the feature title) and copies the feature's args flat into the section as `<key>_<arg>`, with order `index * 1000 + 1 + order * 10` so features stay in registration order and their own args keep theirs. Features without `section` stay direct children of the tab, one box each. The QoL tab has "Dungeons & Raids" (Soulstone Reminder) and "Interface" (Layer Change Prompt).
+
+The window gets an opaque background (`OpaqueBackground` in `ns.OpenOptions`): a texture on AceGUI's pooled Frame widget, shown while KLH's window is open and hidden on its `OnHide`, so other addons reusing the widget keep the default look.
 
 ### Feature group
 
@@ -76,7 +78,7 @@ A feature may set `section` (a string). Features of one tab with the same `secti
 
 1. Every arg gets `disabled = true` and its description is prefixed (`Prefix`) with "Requires: ...". `Prefix` also handles function descriptions.
 2. A `requires` description line is added at order 0.
-3. The section name turns grey (`|cff808080Title|r`). Inline groups have no hover tooltip, so the `requires` line is the visible marker.
+3. The feature title turns grey (`|cff808080Title|r`), as the box title or, inside a section, the header line. Neither has a hover tooltip, so the `requires` line is the visible marker.
 4. `BuildOptionsTable` adds an `unavailable` description to the General tab listing every gated feature and its missing addons.
 
 Addon titles come from `ns.AddonTitle`, with colour codes, texture tags and extra spaces removed by `StripColors` in `Core.lua`.

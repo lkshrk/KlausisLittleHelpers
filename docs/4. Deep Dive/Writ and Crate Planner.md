@@ -2,12 +2,13 @@
 
 ## Overview
 
-The Writ & Crate Planner (feature key `WritCratePlanner`, Forever only, needs Auctionator) plans the cheapest set of Craftsman's Writs, Waylaid Crates and Forged Delivery Receipts that reaches a trade camp reputation or Merchant's Favor target. Prices come from the player's Auctionator scan. It has five files, plus its data:
+The Writ & Crate Planner (feature key `WritCratePlanner`, Forever only, needs Auctionator) plans the cheapest set of Craftsman's Writs, Waylaid Crates and Forged Delivery Receipts that reaches a trade camp reputation or Merchant's Favor target. Prices come from the player's Auctionator scan. It has six files, plus its data:
 
 - `Modules/WritCrateSearch.lua`: pure search, `ns.WritSearch` (`S`).
 - `Modules/WritCrateState.lua`: candidate building, observation logic, the `Learner` that turns game events into observations, bag and price snapshot, `ns.WritState` (`W`).
 - `Modules/WritCrateDepth.lua`: AH price depth, `ns.WritDepth` (`D`): pure cost math plus the `C_AuctionHouse` query queue.
 - `Modules/WritCrateUse.lua`: the receipt and crate-fill secure buttons and their macros, `ns.WritUse` (`U`).
+- `Modules/WritCrateHistory.lua`: pure price history math for the price check, `ns.WritHistory` (`H`).
 - `Modules/WritCratePlanner.lua`: feature, window, observers, shopping list, `ns.WritPlanner` (`P`).
 - Data: `ns.Data.Writs` (150 rows), `ns.Data.WaylaidCrates` (30 rows), `SealedCrates`, `UnlabeledCrate`, `DeliveryReceipt`, `CampFaction`.
 
@@ -17,6 +18,7 @@ The Writ & Crate Planner (feature key `WritCratePlanner`, Forever only, needs Au
 - Combine writs with Forged Delivery Receipts (50 rep for 15 Favor and one empty crate).
 - Offer options that visit fewer zones for a little more gold (travel tiebreak), and one that needs the fewest items to buy.
 - Read prices, bag and bank contents, quest state and standing from the game.
+- Say whether the plan is cheap, OK, high or not worth buying compared with the usual price from Auctionator's history.
 - Create an Auctionator shopping list for what is still missing.
 - Make macros that put receipts on empty crates and fill labeled crates, one press per item.
 - Learn real writ rep and crate Favor values from the player's turn-ins.
@@ -55,6 +57,8 @@ graph TB
 - **`Modules/WritCrateState.lua`**: data shaping and observation rules.
 - **`Modules/WritCrateDepth.lua`**: AH listing costs and the listing query queue.
 - **`Modules/WritCrateUse.lua`**: receipt and crate-fill buttons, `/klh writs macros`.
+- **`Modules/WritCrateHistory.lua`**: history reading, medians, verdict tiers, icon files and colours.
+- **`Media/*.png`**: the chevron icons of the price check (SVG sources in `scripts/media/`).
 - **`Modules/WritCratePlanner.lua`**: UI, events, shopping list, `/klh writs`.
 - **`Data/Writs.lua`**, **`Data/WaylaidCrates.lua`**: row data (see [Data and Generators](<Data and Generators.md>)).
 
@@ -76,7 +80,7 @@ Steps used: rep 25, Favor 5. A receipt gives 50 rep (`RECEIPT_REP`) and costs 15
 
 | Function | Purpose |
 |---|---|
-| `W.Snapshot(settings)` | Reads game state into `input`: `prices`, `owned`, `doneToday`, `onQuest`, `faction`, `level`, `observed`, `scanAge` (the newest price age in days) and `notInScan` (names of items whose price is older than that: they were not listed in the last scan, so their price is dropped and writs and crates needing them are left out). |
+| `W.Snapshot(settings)` | Reads game state into `input`: `prices`, `owned` (bags plus, with `countBank`, the saved bank scan), `bags` (bag counts alone), `bankAt` (when the bank was scanned), `doneToday`, `onQuest`, `faction`, `level`, `observed`, `scanAge` (the newest price age in days) and `notInScan` (names of items whose price is older than that: they were not listed in the last scan, so their price is dropped and writs and crates needing them are left out). |
 | `W.BuildCandidates(input)` | Returns `{ writs, crates, unpriced, lowLevel }`. |
 | `W.Standing()` | Camp faction standing and the Favor currency (ID 3402). |
 | `W.BagCounts()`, `W.SealedCounts(sealed)`, `W.ScanBank()`, `W.ContainerIDs(env)` | Item counting (`SealedCounts` counts only the sealed crate IDs). |
@@ -92,14 +96,26 @@ Steps used: rep 25, Favor 5. A receipt gives 50 rep (`RECEIPT_REP`) and costs 15
 | `D.Cost(listings, n)` | Buys `n` up from the cheapest of `{ {unitPrice, quantity}, ... }`. Returns the total (nil when fewer than `n` are listed) and the listed quantity. |
 | `D.Needs(plan, owned, bundleOf, onQuest)` | `{ [itemID] = count }` still to buy, from `P.ShoppingTerms`. |
 | `D.EffectivePrices(needs, listings, scanPrices)` | Scan prices with each fetched item replaced by its depth total / count. Marks `{ live, short }` per needed item. |
-| `D.PlanCost(plan, owned, listings, scanPrices, bundleOf, onQuest)` | Real cost of a plan under those prices. |
+| `D.PlanCost(plan, owned, listings, scanPrices, bundleOf, onQuest)` | Real cost of a plan under those prices: the items still to buy at their effective prices plus the owned mats it uses (`P.OwnedMats`) at the same prices. |
 | `D.ShortAtScan(needs, available)`, `D.ScanAvailable(needs)` | Items needing more than Auctionator's last scan listed (`Auctionator.Database:GetPriceHistory(tostring(itemID))[1].available`, internal, pcall-guarded). |
 | `D.AuctionatorScanning()`, `D.ScanOutdated()`, `D.StartScan()` | Auctionator's full scan: running, due under its autoscan interval, start it (internal, pcall-guarded). |
 | `D.NewQueue(api)`, `D.LiveApi()` | One-at-a-time listing queries; `q:Run(ids, onProgress, onDone)`, `q:Cancel()`, `q:OnEvent(event, arg)`. `LiveApi` wraps `C_AuctionHouse` and `C_Timer`, or returns nil. |
 
+### `ns.WritHistory`
+
+| Function | Purpose |
+|---|---|
+| `H.ReadHistory(itemIDs)` | `{ [itemID] = { [day] = low } }` from `Auctionator.Database:GetPriceHistory(tostring(itemID))` under `pcall` (internal). Empty when it is missing. |
+| `H.Today(now)` | The current Auctionator day number (`Auctionator.Constants.SCAN_DAY_0`, else 2020-01-01). |
+| `H.Median(list)` | Median of numbers, nil for an empty list. |
+| `H.TypicalPrices(history, today, windowDays, fallback)` | Each item's median daily low in the window (the scan price when it has none), and the number of days with any low. |
+| `H.DaysCovered(history, itemIDs, today, windowDays)` | Number of distinct days in the window (today left out) on which any of `itemIDs` has a low. |
+| `H.DayPrices(history, today, windowDays, fallback)` | One price set per day that has a low, each item at its low that day or its last earlier low. |
+| `H.Verdict(todayUnit, usualUnit, s)` | `{ tier, pct }` or nil; the difference is rounded to a whole percent once, the tier judges that value and `pct` is it divided by 100, so the shown percent and the tier always agree. `TIER_LABEL`, `TIER_COLOR` and `TIER_ICON` belong to the tiers `cheap`, `ok`, `high`, `dontbuy`. |
+
 ### `ns.WritPlanner`
 
-Pure helpers: `P.GainTo(standing, target)`, `P.ParseAmount`, `P.CleanAmount`, `P.FormatNumber`, `P.FormatMoney`, `P.ShortMoney`, `P.ResetText`, `P.ShoppingTerms(plan, owned, bundleOf, onQuest)`, `P.RepriceLines(plan, prices, input, bundleOf)`, `P.MissingNames(terms)`, `P.EmptyCrates(input)`, `P.SwitchMode(state, mode)`, `P.RestoreState(state, saved)`, `P.FewestBuys`, `P.Frontier(options)`, `P.NeedIDs`. View builders: `P.OptionLabel`, `P.OptionRows`, `P.PlanLines`, `P.Groups(plan, mode)`, `P.ReceiptSteps`, `P.Entries`, `P.WindowRows`, `P.Summary(r)`, `P.FavorText`, `P.Footer(r)`.
+Pure helpers: `P.GainTo(standing, target)`, `P.ParseAmount`, `P.CleanAmount`, `P.FormatNumber`, `P.FormatMoney`, `P.ShortMoney`, `P.ResetText`, `P.ReceiptHowTo(g, r)`, `P.ShoppingTerms(plan, owned, bundleOf, onQuest)`, `P.OwnedMats(plan, owned, bundleOf, onQuest)`, `P.BankText(plan, bundleOf, onQuest)`, `P.BankAge(scannedAt, now)`, `P.CostSplit(plan)`, `P.RepriceLines(plan, prices, input, bundleOf)`, `P.CheapestAt(r, prices, settings)`, `P.PriceCheck(r, settings, history)`, `P.PricePct(pc, level)`, `P.YoungNote(pc)`, `P.MissingNames(terms)`, `P.EmptyCrates(input)`, `P.SwitchMode(state, mode)`, `P.RestoreState(state, saved)`, `P.FewestBuys`, `P.Frontier(options)`, `P.NeedIDs`. View builders: `P.OptionLabel`, `P.OptionRows`, `P.PlanLines`, `P.Groups(plan, mode)`, `P.ReceiptSteps`, `P.Entries`, `P.WindowRows`, `P.Summary(r)`, `P.Footer(r)`.
 
 ### `ns.WritUse`
 
@@ -142,14 +158,48 @@ See workflow 6 in the [Workflow Overview](<../3. Workflow Overview.md>). The pla
 - Mode, the target text and the goal are saved per character in `KLH_CharDB.WritCratePlanner.plan` (`mode`, `target`, `goal`) on each Search and on Reset, and restored when the window is built (`P.RestoreState`).
 - Info icon (`P.Footer` returns `{ lines, text, warn }`): the title shows the scan freshness ("Prices from today's scan", orange "Scan is N days old: rescan the AH", otherwise "Planner info"), then the price source, Friendly cap, level and reset lines, then "Not in your last scan" and "No price" ("No price or none listed" at the AH) as headed sections with one name per line (at most 8, then "and N more"; names already under the first are not repeated). The icon in the title bar shows them on hover (`window:SetInfo`); it is always there ("Nothing to note yet." when there is nothing) and turns orange when one is a warning. There is no footer under the list.
 - Layout: `P.Summary` is pinned above the list only when it adds something: the waiting and loading states, the idle prompt, the reason for an empty plan ("Writs need level 10.", "Every writ is done today. <reset>", "Nothing priced to plan with. Scan the AH with Auctionator first." or "Nothing to plan with: no writs or crates are available."), or, for the picked option, the Favor it uses and the orange shortfall (cost, gain and zones are on the option's row). The prompt for no target reads "Type a target amount, or pick a standing." in rep mode and "Type a target amount." in Favor mode, which has no standing arrow. `P.Entries` groups a plan's writs under zone headers in plan order, each row the name with owned and listing notes and cost and gain. In rep mode the crates and receipts come last as the "Receipts (N)" group; in Favor mode the crates are the only group and have no header.
+- Item tooltips: hovering a writ row shows the writ's item tooltip, a crate row (and the receipt steps' fill and buy rows) the crate's, with the planner's hint (bundle, turn-in NPC) below it.
 - Bank scan: on `BANKFRAME_OPENED` and while it stays open, `W.ScanBank` saves counts and a timestamp to `KLH_CharDB.WritCratePlanner.bank`. If no slots are readable the old scan stays.
-- Settings: "Count bank items", "Spend my Favor on receipts" and "Add up listings from" (2 to 100, default 10) in one row, then the "Create macros" button in its own row. Defaults: `countBank = true`, `useFavorForReceipts = false`, `liveMinQty = 10`. Changes apply on the next Search.
+- Owned items: mats (a writ's requested items and crate fill items) always count at their AH price, owned or not, so every option is compared at full value; only owned writ scrolls, owned crates and owned empty crates are free. An owned mat without a price is free rather than unplannable. `P.RepriceLines` draws owned items from one pool across lines, bags first, then the bank: each line keeps `fromBank` (shown as an orange "(N from bank)"), and the plan keeps `ownValue` (owned mats used, at their price) and `fromBank` (itemID -> count). Owned labeled crates and the owned empty crates receipts go on draw from the same pool: owned crate lines first, then the empties (`count - bought` of a receipt line) over the crate types `P.EmptyCrates` counts (labeled crates in data order, then the unlabeled crate), bags of every type before the bank; their banked part lands in `fromBank`, `bankNames` and the line's `fromBank` (the "Nx empty crates you have" row shows it). Their cost stays 0. The pinned summary (reading `bundleOf` and `onQuest` of the round the shown option came from, `r.view`) then says "Get from your bank first: 9 Dream Dust, 4 Small Brilliant Shard" (plus " (bank seen N days ago)" when the scan is a day old) and "Cost X: buy Y, your mats Z"; the option tooltip adds "To buy", "Your mats" and the bank line. The Auctionator list still holds only what to buy.
+- Settings: "Count bank items", "Spend my Favor on receipts" and "Add up listings from" (2 to 100, default 10) in one row, then the "Create macros" button in its own row. Defaults: `countBank = false` (bank items you have not taken out made plans short at the AH), `useFavorForReceipts = false`, `liveMinQty = 10`. Changes apply on the next Search. The price check has its own settings, see Price check.
 - Receipt and crate macros (`Modules/WritCrateUse.lua`, `ns.WritUse`): two hidden secure buttons are made at login (out of combat), `KLHApplyReceiptButton` and `KLHFillCrateButton` (`SecureActionButtonTemplate`, `useOnKeyDown = false`). Each item use needs a real click or key, so an account-wide (General) macro `/click`s them: "KLH Receipt" (`#showtooltip item:262902`) and "KLH Fill Crate", both made or updated by the settings button Create macros or `/klh writs macros` (`U.MakeMacros`: `CreateMacro`/`EditMacro`, not in combat), which removes older character copies (`DeleteMacro`), closes our settings window and Blizzard's settings panel (`ns.CloseOptions`) so nothing covers it, and opens Blizzard's macro window on the General tab with KLH Fill Crate selected (`ShowMacroFrame`, `MacroFrame:ChangeTab(1)`, `SelectMacro`). KLH Fill Crate has no `#showtooltip` and uses the labeled crate's own icon (`C_Item.GetItemIconByID(248682)`) to drag them from. The buttons use Blizzard's item action with item targeting (`type = "item"` plus `target-bag`/`target-slot`, which `SecureActionButtonTemplate` applies with `C_Container.UseContainerItem` when the item's spell can target an item). They are re-armed out of combat before each press, on bag changes and when combat ends: the receipt button uses `item:262902` on the first empty Waylaid Crate (labeled or unlabeled, `U.ReceiptPlan`); the fill button uses the first labeled crate (`item = "<bag> <slot>"`) on a single stack that covers one of its bundles (`U.FillPlan`; unlabeled crates need their label read first and are skipped). A press that works prints nothing. After one, further presses are ignored (the button is disarmed in `PreClick`) until `BAG_UPDATE_DELAYED` shows the result, `UNIT_SPELLCAST_FAILED`/`INTERRUPTED` ends it, or 3 s pass, and while the player casts or channels; so spamming cannot aim twice at the same crate before the bags update. If the game refuses a target, the targeting cursor is still up in `PostClick`, so the button cancels it (`SpellStopTargeting`), remembers that crate kind as refused for the session, prints why ("A receipt could not go on <crate>: the game refused it as a target..." or "<crate> could not be filled from <stack>..."), and the next press tries another crate. With nothing to do a press prints that.
-- Receipt steps: in rep mode the crates and receipts of a plan form a "Receipts (N)" group (N receipts; its rep is the receipts' rep) listed as steps (`P.ReceiptSteps`): "1. Use X Favor you have" when the balance pays part, "1. Fill Nx <crate>" per crate line (cost and Favor, tooltip names the bundle), "2. Buy Nx <empty crate>" for crates bought (cost) and "2. Use N empty crates you have" for owned ones, then "3. Get Nx Forged Delivery Receipt" (rep, no cost; tooltip: the Favor it takes at the Uncertified Scribe). Favor-mode crate lines stay plain.
-- Receipts: from Friendly on, `S.RepPlan` always weighs receipts against writs. "Spend my Favor on receipts" (`useBalance`) only decides whether the Favor you have pays first: on, your balance is spent, then crates are filled for the rest; off, all the Favor comes from filled crates and your own is kept. A plan with receipts carries `plan.favor = { need, fromBalance, fromCrates }`; the summary says "Uses N Favor: X you have, Y from crates" or "Uses N Favor, all from crates" (`P.FavorText`) and the popup has "Favor for receipts", "Paid with your Favor" (only when spent) and "From crates" rows.
+- Receipts: in rep mode the crates and receipts of a plan form a "Receipts (N)" group (N receipts; its rep is the receipts' rep), listed as items like the Favor view (`P.ReceiptSteps`): one row per crate to fill ("77x Journeyman Textiles", cost and Favor, tooltip names the bundle), the empty crates to buy ("62x Waylaid Crate (empty)") or "Nx empty crates you have", and "Nx Forged Delivery Receipt" (rep; tooltip: the Scribe, the Favor it costs). Each item row shows the game's item tooltip on hover. A last grey row, without a right column so it wraps, explains the flow in one sentence written from the plan (`P.ReceiptHowTo`): "Fill the Journeyman Textiles crates and turn them in for Favor. Buy 62 receipts at the Scribe with that and your own Favor. Put one on each empty Waylaid Crate and turn it in." (it names the bought crate type only when every receipt goes on a bought empty, else "empty crate"); its tooltip adds the Scribe and the KLH Fill Crate and KLH Receipt macros.
+- Names: every item label is the game's full item name through `P.ItemLabel(itemID, fallback)`, `P.WritName(ref)` ("Craftsman's Writ: ...") and `P.CrateName(ref)` ("Waylaid Crate: ...", or "Waylaid Crate" for the unlabeled one); our data's full name is only the fallback until the game has the item cached. No row abbreviates names. The window is 420 px wide so full names fit.
+- Money: `P.FormatMoney` shows gold and silver from 1g up (copper rounded into silver) and silver and copper below; `P.ShortMoney` is the same format, so rows, headers and option labels match.
+- Receipts: from Friendly on, `S.RepPlan` always weighs receipts against writs. "Spend my Favor on receipts" (`useBalance`) only decides whether the Favor you have pays first: on, your balance is spent, then crates are filled for the rest; off, all the Favor comes from filled crates and your own is kept. A plan with receipts carries `plan.favor = { need, fromBalance, fromCrates }`; the option popup has "Favor for receipts", "Paid with your Favor" (only when spent) and "From crates" rows.
 - Shopping list: `ConvertToSearchString(CALLER, { searchString, isExact = true, quantity })` per term, then `CreateShoppingList(CALLER, "KLH Writs" or "KLH Crates", terms)`. `CALLER` is "KlausisLittleHelpers".
 - With the AH open, Create Auctionator list then switches to Auctionator's Shopping tab (`AuctionatorTabs_Shopping:Click()`, the same call Auctionator's own `MultiSearch` API makes) and fires `Auctionator.Shopping.Tab.Events.ListSearchRequested` with the new list on `Auctionator.EventBus`, which opens and searches it (`P.OpenShoppingList`; the event part is internal, under pcall, so only the tab switch remains if it changes).
 - The feature is `alwaysOn` and registers `/klh writs` even when Auctionator lacks the needed API (the command then prints that it needs Auctionator).
+
+### Price check
+
+The check tells whether the plan's cost per rep (rep mode) or per Favor (Favor mode) is a good deal against the usual cost for the same target and mode. It never judges single items. The only price data is Auctionator's saved daily history (`H.ReadHistory`).
+
+- `P.PriceCheck(r, settings)` runs in the Search path right after `Calculate`, before the result is shown, on the scan-price options, and `FinishDepth` keeps its usual unit, method and days and judges the options it ends with again (`P.RejudgeAtScan`): each final option's plan is repriced at the scan prices (`RepriceLines(o.plan, run.scan, ...)`) and its unit compared with the kept `usualUnit`, so the verdict describes the plan shown, with no extra planner run. Today's side is each option's `plan.cost / plan.gain` at scan prices; `P.PriceCheck` and `P.RejudgeAtScan` share the per-level judging (`JudgeLevels`).
+- `P.CheapestAt(r, prices, settings)` builds the usual plan with the same pipeline as today's plan (`BuildCandidates`, then `RepPlan` or `FavorPlan`, then `RepriceLines`) and the same owned items, done-today writs, standing and target. Only the prices are swapped. The cheapest plan is used, with no tie-break or zone options.
+- "Usual price from" (`priceMethod`): Typical prices (`typical`, default) prices each item at its median daily low over the last `historyDays` days before today (today itself is left out) and plans once. Past days (`days`) plans once per past day (`H.DayPrices`) and takes the median of the unit costs; it costs up to 21 planner runs per Search, done once.
+- Verdict (`H.Verdict`): `pct = round(100 * (today / usual - 1)) / 100`. Cheap when `pct <= -cheapBelow`, Don't buy when `pct > dontBuyAbove`, High when `pct > highAbove`, else OK. The result is `r.priceCheck.byLevel[option level] = { tier, pct, unit }`, plus `method`, `days` and `usualUnit`.
+- No verdict, `r.priceCheck.reason`: `none` ("No price history"), `few` ("Not enough price history (N days)", fewer than `minDays` days, capped at `historyDays`, have price history for the items of today's cheapest plan: its writs, writ items, crates and bundle items, as `H.DaysCovered` counts them; `days` in the result is that count), `empty` and `short` (both "No usual price for this target": the usual plan is empty, or reaches less of the target than today's plan).
+- Settings (planner options, "Price check" header, below the toggles):
+
+  | Setting | Key | Values | Default |
+  |---|---|---|---|
+  | Usual price from | `priceMethod` | Typical prices / Past days | Typical prices |
+  | History days | `historyDays` | 3 to 21 | 14 |
+  | Minimum days | `minDays` | 2 to 14 | 5 |
+  | Cheap below (%) | `cheapBelow` | 5 to 50 | 15 |
+  | High above (%) | `highAbove` | 5 to 100 | 15 |
+  | Don't buy above (%) | `dontBuyAbove` | 20 to 200 | 50 |
+
+  Auctionator keeps 21 days by default, so a longer window adds nothing.
+- Display:
+  - Each option row gets a tinted chevron before its cost (`entry.icon`, see [UI and ListWindow](<UI and ListWindow.md>)): Cheap one chevron down, green; OK none; High one chevron up, orange; Don't buy two chevrons up, red. The shapes differ so it reads without colour vision.
+  - The summary has no price line: the chevron on the option row (also on the pinned picked row) is the verdict at a glance.
+  - The option popup gets a "Price check" row like Cost and Gain: the change against usual right aligned in the tier colour (`P.PricePct`, e.g. "+44%"), or the reason, followed by "Per rep" (or "Per Favor") and "Usual" rows with the two costs per unit.
+  - While the history has fewer than 10 days, the tooltip row adds a grey "(N days)" (`P.YoungNote`), so a verdict from a short history reads as a rough one. No prices ship with the addon: Auctionator's history is per realm and faction, so baked-in values would judge other auction houses wrongly and go stale.
+  - The info icon lists "Price check: Typical prices, N days" (or "Past days"), or the reason when there is no verdict.
+- Icons are our own white 32x32 RGBA PNGs in `Media/`, drawn as SVG in `scripts/media/` and tinted in code with `SetVertexColor`. Inline `|A:...|a` and `|T:...|t` markup does not render on Forever (tested in game in a tooltip and in chat), which is why the icon is a texture on the row.
+- Not yet checked: whether newly added `Media` files load after `/reload` or need a client restart.
 
 ### AH price depth
 
@@ -178,10 +228,12 @@ See workflow 6 in the [Workflow Overview](<../3. Workflow Overview.md>). The pla
 - `writuse_test.lua`: `U.ReceiptPlan` (receipts across stacks, labeled and unlabeled crates, refused crate kinds), `U.FillPlan` (one stack per bundle, unlabeled crates skipped, refused kinds) and `U.MacroBody`.
 - `candidates_test.lua`: `BuildCandidates` (done today, unpriced, faction, bank container IDs).
 - `observe_test.lua`: `Observe`, `SettleWrit`, `CrateFavor`, `DepartedCrate`, `SealedRow`, `PastFriendly`, and candidates using observed values.
+- `writhistory_test.lua`: `H.Median`, `TypicalPrices`, `DaysCovered`, `DayPrices`, `Verdict` thresholds and rounding, and `ReadHistory` with a stubbed Auctionator database (non-table internals and rows ignored).
+- `pricecheck_test.lua`: `P.CheapestAt`, `P.PriceCheck` (both methods, each reason, minimum days over the plan's items only), `P.RejudgeAtScan` and the display helpers (`P.PricePct`, `P.YoungNote`, the tooltip rows).
 - `plannerevents_test.lua`: the planner's event frames and window wiring with mocked frames and Auctionator.
-- `writdepth_test.lua`: `Cost` (single and many tiers, too few, none), `Needs` with owned items, `EffectivePrices`, `PlanCost`, `ShortAtScan`.
+- `writdepth_test.lua`: `Cost` (single and many tiers, too few, none), `Needs` with owned items, `EffectivePrices`, `PlanCost` (owned mats valued), `ShortAtScan`.
 - `writdepthqueue_test.lua`: the queue with a stubbed API: commodity and item paths, throttle and Auctionator waits, key info wait, stale runs, AH close, cache, timeouts.
-- `writdepthwiring_test.lua`: planner wiring with stubbed `C_AuctionHouse` and Auctionator: scan hint, replanning onto the really cheaper writ, live marks and info lines, cache reuse, AH closed mid-run.
+- `writdepthwiring_test.lua`: planner wiring with stubbed `C_AuctionHouse` and Auctionator: scan hint, replanning onto the really cheaper writ, live marks and info lines, the verdict of the live-priced options, cache reuse, AH closed mid-run.
 - `planner_test.lua`: `GainTo`, `ParseAmount`, `CleanAmount`, `FormatNumber`, `FormatMoney`, `ShortMoney`, `ResetText`, `ShoppingTerms`, `RepriceLines`, `MissingNames`, `EmptyCrates`, `SwitchMode`, `RestoreState`, `FewestBuys`, `Frontier`, `NeedIDs`, `OptionLabel`, `OptionRows`, `PlanLines`, `Entries`, `WindowRows`, `Summary`, `Footer`. It stubs `ns.RegisterFeature` so the module loads.
 - `data_test.lua`: row counts (150 writs, 30 crates), a known writ, sealed crate rows, and that most rows have turn-in data.
 - `writlearner_test.lua`: `WritState.Learner` fed in the client's event orders: writ turn-ins, late reputation, Friendly zeros, crate gains before and after the bag update, the 5 second window and halving.

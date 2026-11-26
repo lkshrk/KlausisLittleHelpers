@@ -44,3 +44,27 @@ do
     eq(t.atlas, nil); ok(t.file ~= nil)
     _G.C_Texture = savedTexture
 end
+
+do
+    local savedTip = rawget(_G, "GameTooltip")
+    local tipCalls = {}
+    local tip = setmetatable({}, { __index = function(_, k)
+        return function(_, ...) tipCalls[#tipCalls + 1] = { k, ... } end
+    end })
+    _G.GameTooltip = tip
+    ns.UI.ShowItemTooltip("owner", 248699, "Fill each with 20 Dream Dust.")
+    local names = {}
+    for _, c in ipairs(tipCalls) do names[#names + 1] = c[1] end
+    local seq = table.concat(names, ",")
+    ok(seq:find("SetOwner,SetItemByID,AddLine,AddLine,Show", 1, true), "item tooltip, then our hint below it: " .. seq)
+    local set
+    for _, c in ipairs(tipCalls) do if c[1] == "SetItemByID" then set = c[2] end end
+    eq(set, 248699)
+    eq(tipCalls[#tipCalls - 1][2], "Fill each with 20 Dream Dust.")
+    tipCalls = {}
+    ns.UI.ShowItemTooltip("owner", 1)
+    local adds = 0
+    for _, c in ipairs(tipCalls) do if c[1] == "AddLine" then adds = adds + 1 end end
+    eq(adds, 0, "no hint, no extra lines")
+    _G.GameTooltip = savedTip
+end

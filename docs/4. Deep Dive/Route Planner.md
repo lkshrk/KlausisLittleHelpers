@@ -16,7 +16,7 @@ The Route Planner (feature key `TurnInRoute`, title "Turn-in Route", Forever onl
 - Collect turn-in stops from registered sources and merge stops at the same place.
 - Turn the player position, the stops, flight nodes, docks, hearthstone and teleports into a weighted graph.
 - Order the stops (travelling salesman) and produce steps per leg (ground, flight, boat, hearth, teleport).
-- Show the route: list window, numbered markers on world map pins, coloured lines on the map canvas.
+- Show the route: list window, numbered markers and coloured lines on the map canvas.
 - Add and manage TomTom waypoints, point the arrow at the next leg.
 - Learn the player's real speeds and hearthstone bind. Save and restore the route across a reload.
 
@@ -51,7 +51,7 @@ graph TB
 
 - **`Modules/TurnInRouteGraph.lua`**: `ns.RouteGraph` (`G`). No game calls.
 - **`Modules/RoutePlanner.lua`**: `ns.RoutePlanner` (`RP`).
-- **`Modules/RouteDraw.lua`**: `ns.RouteView` (`Attach`, `Init`, `Draw`, `QueueDraw`).
+- **`Modules/RouteDraw.lua`**: `ns.RouteView` (`Attach`, `Init`, `Draw`, `QueueDraw`). Ground legs are solid yellow bows (a quadratic curve bulging 10% of the leg's length to the left of the travel direction, drawn as 16 pieces; purely visual, since the game gives addons no walking path); flights (blue) and boats (teal) are dotted (4 px dot, 5 px gap, kept in screen pixels at any map zoom): flights along the real flight path from `Data/TaxiPaths.lua`, with the dot pattern carried across the path's bends so the spacing stays even, and boats straight from dock to dock. Each dotted segment is clipped to the canvas plus a 50 screen px margin (`V.Clip`), and the dot phase advances over the skipped length, so a zoomed-in map makes only the visible dots and the spacing stays even across the clip edge. Every point converts with its own instance (`GetZoneCoordinatesFromWorldInstance`; both ends of a boat or ground bow use their own), so the Azeroth world map shows both continents in place. Without that HereBeDragons function a point whose instance differs from the map's (`GetWorldCoordinatesFromZone(0.5, 0.5, mapID)`) is off the map. Lines and markers sit on two layers of the map canvas that `RaiseLayers` puts above the highest other map frame (other addons stack their pins up to level ~3000; capped at 9900) when the map ID changes or the map is shown, not on zoom redraws: lines first, the numbered markers just above. The markers are our own frames, scaled to a constant screen size, not shared map pins.
 - **`Modules/RouteWaypoints.lua`**: `ns.RouteWaypoints` (`Attach`, `Init`, `Has`, `AddLeg`, `RemoveLeg`, `RemoveRoute`, `ClearAll`, `ArrowTo`, `FollowArrow`, `OnTaxiTaken`).
 - **`Modules/TurnInRoute.lua`**: feature registration, `T.ReadyWrits`, `T.WritQuestIds`, `T.MissingQuestieApi`, `T.MenuItems`, `T.Plan`.
 - **`Data/TaxiPaths.lua`**: `ns.TaxiPaths[from][to] = { yards, stopSeconds, { x1, y1, x2, y2, ... } }` in HereBeDragons world coordinates, plus `ns.Transports`: 13 entries of `{ docks = { { instance, wx, wy, side? }, ... }, legs = { yards... }, stops = seconds }`.
@@ -130,7 +130,7 @@ Defaults `useHearth = false`, `useTeleports = false`, `waypoints = "add"`. Optio
 ## Dependencies
 
 - Internal: `ns.RouteGraph`, `ns.RouteView`, `ns.RouteWaypoints`, `ns.CreateListWindow`, `ns.UI`, `ns.GetSettings`, `ns.WritState.BagCounts` (optional), `ns.Data.Writs`, `ns.Teleports`.
-- External: Questie (`QuestieDB`, `ZoneDB`, `DistanceUtils`, `HBD`), HereBeDragons-Pins-2.0, Krowi_WorldMapButtons-1.4, TomTom (optional), RestedXP (paused through `SlashCmdList.ACECONSOLE_RXP`), WoW map, taxi, quest, item, spell book APIs.
+- External: Questie (`QuestieDB`, `ZoneDB`, `DistanceUtils`, `HBD`), Krowi_WorldMapButtons-1.4, TomTom (optional), RestedXP (paused through `SlashCmdList.ACECONSOLE_RXP`), WoW map, taxi, quest, item, spell book APIs.
 
 ## Testing
 
@@ -138,6 +138,7 @@ Defaults `useHearth = false`, `useTeleports = false`, `waypoints = "add"`. Optio
 - `routeopts_test.lua`: `G.Shortcuts` for hearth and teleports, `#ns.Teleports == 6`.
 - `teleports_test.lua`: spell IDs, sides, continents and coordinate bounds of `Data/Teleports.lua`.
 - `routeplanner_test.lua`: `MergeStops`, `RegisterSource`, `Sources`, `Collect`, `WaypointSteps`, `Start`, `RestoreKeep`.
+- `routedraw_test.lua`: a ground step is a joined solid bow from stop to stop that bulges 10% at its middle, its end converted with the end's instance; a boat step is dotted; a flight becomes evenly spaced dots no longer than the dot length, covering about 4 of every 9 units of the path, and no dot cuts across a bend; a flight mostly off the canvas makes only the dots inside the margin, evenly spaced across the skipped part; layers are raised on a map change or show, not on a redraw or zoom; the fallback conversion drops points of another instance; markers keep their screen size and offsets at canvas scales 2 and 0.5.
 - `routeevents_test.lua`: `RoutePlanner` with the real `RouteDraw` and `RouteWaypoints`: TomTom callbacks, one waypoint per transit step, the arrow, partial turn-ins and removed legs.
 - `routequestie_test.lua`: `TurnInRoute` with and without a complete Questie API (`T.MissingQuestieApi`).
 - `routewiring_test.lua`: stubs the game API and HereBeDragons, then covers restore with and without TomTom, `RestoreKeep`, `PlanSources` messages, the hearth and cooldown rules and `Plan` with a stubbed world.

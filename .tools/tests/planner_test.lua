@@ -10,7 +10,7 @@ eq(P.GainTo({ standingID = 8, current = 0 }, 6), 0)
 eq(P.GainTo({}, 6), nil)
 
 eq(P.ParseAmount("+5,800 rep"), 5800); eq(P.ParseAmount(" 500 "), 500); eq(P.ParseAmount("Honored"), nil)
-eq(P.FormatMoney(450300), "45g 03s"); eq(P.FormatMoney(12345678), "1,234g 56s 78c"); eq(P.FormatMoney(305), "3s 05c")
+eq(P.FormatMoney(450300), "45g 03s"); eq(P.FormatMoney(12345678), "1,234g 57s", "copper rounds into silver from 1g up"); eq(P.FormatMoney(1133987), "113g 40s"); eq(P.FormatMoney(19999), "2g 00s"); eq(P.FormatMoney(305), "3s 05c")
 eq(P.FormatMoney(7), "7c"); eq(P.FormatNumber(42000), "42,000"); eq(P.FormatNumber(500), "500")
 
 local writ = { writID = 10, name = "Big Bronze Knife", itemID = 20, item = "Big Bronze Knife", qty = 2 }
@@ -124,7 +124,7 @@ do
 end
 
 do
-    local w1 = { name = "Writ One", zone = "Ashenvale", qty = 1 }
+    local w1 = { name = "Writ One", zone = "Ashenvale", qty = 1, writID = 501 }
     local w2 = { name = "Writ Two", zone = "Duskwood", qty = 1 }
     local w3 = { name = "Writ Three", zone = "Ashenvale", qty = 1 }
     local er = { input = { owned = {}, onQuest = {} }, bundleOf = {}, plan = { lines = {
@@ -136,10 +136,12 @@ do
     local e = P.Entries(er)
     local shape = {}
     for _, x in ipairs(e) do shape[#shape + 1] = x.header and ("[" .. x.text .. "]") or x.text end
-    eq(table.concat(shape, "|"), "[- Ashenvale (2)]|Writ One|Writ Three|[- Duskwood (1)]|Writ Two|[- Receipts (2)]|2. Use 2 empty crates you have|3. Get 2x Forged Delivery Receipt",
+    eq(table.concat(shape, "|"), "[- Ashenvale (2)]|Craftsman's Writ: Writ One|Craftsman's Writ: Writ Three|[- Duskwood (1)]|Craftsman's Writ: Writ Two|[- Receipts (2)]|2x empty crates you have|2x Forged Delivery Receipt|"
+        .. "|cff9d9d9dBuy 2 receipts at the Scribe with your Favor. Put one on each empty crate and turn it in.|r",
         "rows grouped by zone in plan order, crates and receipts last")
     eq(e[2].indent, true, "rows under a header are indented")
-    ok(e[2].right:find("1s 20c", 1, true) and e[2].right:find("+75", 1, true), "cost and rep in the right column: " .. e[2].right)
+    eq(e[2].itemID, 501, "a writ row shows the writ's own item tooltip")
+    eq(e[2].right, "1s 20c", "cost in the right column"); eq(e[2].extra, "+75", "rep in its own column")
     local receiptOnly = P.Entries({ input = { owned = {} }, bundleOf = {}, plan = { lines = {
         { kind = "receipt", count = 1, cost = 30, gain = 50 } } } })
     eq(receiptOnly[1].header, true, "receipt-only plan still gets its Receipts steps"); eq(receiptOnly[2].indent, true)
@@ -194,7 +196,7 @@ do
     local rows = P.OptionRows(base)
     eq(#rows, 2); eq(rows[1].text, "Cheapest"); eq(rows[1].data, 1); eq(rows[2].data, 2)
     eq(rows[2].text, "-1 zone, +4c", "trade-off named by what it saves and costs")
-    ok(rows[1].right:find("1s 00c", 1, true) and rows[1].right:find("2 zones", 1, true), "cost and zones: " .. rows[1].right)
+    eq(rows[1].right, "1s 00c", "option cost"); eq(rows[1].extra, "2 zones", "zones in their own column")
     eq(rows[2].selected, true); eq(rows[1].selected, nil)
     local lines = rows[1].tooltipLines
     ok(type(lines) == "table" and #lines >= 3, "hover popup lines")
@@ -219,7 +221,7 @@ do
     local idle = P.Summary({ idle = true, mode = "rep", target = 5800 }).text
     ok(idle:find("Press Search to plan +5,800 rep.", 1, true), idle)
 
-    eq(P.ShortMoney(1234567), "123g 45s"); eq(P.ShortMoney(4567), "45s 67c"); eq(P.ShortMoney(45), "45c")
+    eq(P.ShortMoney(1234567), "123g 46s"); eq(P.ShortMoney(4567), "45s 67c"); eq(P.ShortMoney(45), "45c")
     local three = { mode = "rep", options = {
         { plan = { cost = 5000000, zones = 18 } }, { plan = { cost = 5019446, zones = 13 } }, { plan = { cost = 5602100, zones = 9 } } } }
     eq(P.OptionLabel(three, 1), "Cheapest"); eq(P.OptionLabel(three, 2), "-5 zones, +1g 94s"); eq(P.OptionLabel(three, 3), "-9 zones, +60g 21s")
@@ -253,11 +255,7 @@ do
         favor = { need = 930, fromBalance = 160, fromCrates = 770 } }
     local fr2 = { mode = "rep", target = 5800, plan = withFavor, options = { { level = 0, plan = withFavor } }, selected = 1,
         input = { owned = {}, onQuest = {} }, bundleOf = {}, cands = { unpriced = {} } }
-    local sum2 = P.Summary(fr2).text
-    ok(sum2:find("Uses 930 Favor: 160 you have, 770 from crates", 1, true), sum2)
-    withFavor.favor.fromBalance = 0
-    ok(P.Summary(fr2).text:find("Uses 930 Favor, all from crates", 1, true), "own Favor kept: " .. P.Summary(fr2).text)
-    withFavor.favor.fromBalance = 160
+    ok(not (P.Summary(fr2) or { text = "" }).text:find("Favor", 1, true), "the Favor split lives in the option tooltip, not the summary")
     local lines = P.PlanLines(fr2, fr2.options[1], "Cheapest")
     local stats = {}
     for _, l in ipairs(lines) do if l.label then stats[l.left] = l.right end end
@@ -292,11 +290,11 @@ do
     end
     local folded = P.Entries(r, { open = { Duskwood = true } })
     ok(shape(folded):find("Ashenvale %(1%)%]|%[") ~= nil, "zones not opened stay folded: " .. shape(folded))
-    ok(shape(folded):find("Duskwood (1)]|Writ Two", 1, true) ~= nil, "opened zone shows its writs: " .. shape(folded))
+    ok(shape(folded):find("Duskwood (1)]|Craftsman's Writ: Writ Two", 1, true) ~= nil, "opened zone shows its writs: " .. shape(folded))
     ok(folded[1].text:find("Ashenvale (1)", 1, true) and folded[1].data and folded[1].data.group == "Ashenvale", "zone header: name (count): " .. folded[1].text)
-    ok(folded[1].right:find("1s 20c", 1, true) and folded[1].right:find("+75", 1, true), "header: cost then rep like its rows: " .. tostring(folded[1].right))
+    eq(folded[1].right, "1s 20c", "header cost like its rows"); eq(folded[1].extra, "+75", "header rep in the same column as its rows")
     local other = folded[#folded]
-    ok(other.text:find("Receipts (2)", 1, true) and other.right:find("+100", 1, true), "receipts group counts items and rep: " .. other.text .. " " .. other.right)
+    ok(other.text:find("Receipts (2)", 1, true) and other.extra == "+100", "receipts group counts items and rep: " .. other.text)
     eq(#P.Entries(r, { open = {} }), 3, "all zones folded by default")
 
     local rows, pinned = P.WindowRows(r, { open = {} })
@@ -324,11 +322,13 @@ do
     local shared = rp.lines[4]
     local prices = { [1] = 100, [2] = 30, [10] = 7, [11] = 2 }
     local out = P.RepriceLines(rp, prices, { owned = { [2] = 1 }, onQuest = {} }, rb)
-    eq(out.lines[1].cost, 100 + 30, "writ: writ plus the one missing item")
+    eq(out.lines[1].cost, 100 + 2 * 30, "writ: writ plus both items, the owned one at its price")
     eq(out.lines[2].cost, 3 * (20 * 2 + 7), "bought crates: fill plus crate")
     eq(out.lines[3].cost, 20 * 2, "owned crate: fill only")
     eq(out.lines[4].cost, 2 * 7, "receipts: the empty crates bought")
-    eq(out.cost, 130 + 141 + 40 + 14, "total is the sum of its lines")
+    eq(out.cost, 160 + 141 + 40 + 14, "total is the sum of its lines")
+    eq(out.ownValue, 30, "value of the owned item used")
+    eq(out.fromBank, nil, "nothing from the bank without bank counts")
     eq(shared.cost, 1, "lines are copied, shared lines untouched")
 
     local fav = { mode = "favor", target = 200, input = { owned = {}, onQuest = {} }, rb = {}, cands = { unpriced = {} } }
@@ -336,34 +336,41 @@ do
     local zl = P.PlanLines(fav, { plan = fplan2 }, "Cheapest")
     for _, l in ipairs(zl) do ok(l.left ~= "Zones", "no Zones row in Favor mode") end
     fav.options, fav.plan = { { level = 0, plan = fplan2 } }, fplan2
-    ok(not P.OptionRows(fav)[1].right:find("zone", 1, true), "favor option row shows Favor, not zones")
+    ok(not P.OptionRows(fav)[1].extra:find("zone", 1, true), "favor option row shows Favor, not zones")
 end
 
 do
     local textiles = { itemID = 248688, name = "Journeyman Textiles" }
-    local empty = { itemID = 248549, name = "Waylaid Crate" }
+    local empty = { itemID = 248549, name = "Waylaid Crate", labeled = false }
     local rplan = { cost = 0, gain = 3100, zones = 0, short = 0, favor = { need = 930, fromBalance = 160, fromCrates = 770 }, lines = {
         { kind = "receipt", count = 62, bought = 62, crateRef = empty, cost = 1812, gain = 3100 },
         { kind = "crate", ref = textiles, count = 77, owned = false, cost = 274257, gain = 770 },
     } }
     local rr = { mode = "rep", target = 3100, plan = rplan, input = { owned = {}, onQuest = {} },
         bundleOf = { [textiles] = { name = "Wool Cloth", count = 20 } }, cands = { unpriced = {} } }
+    ns.Data.DeliveryReceipt = 262902
     local e = P.Entries(rr)
     local texts = {}
     for _, x in ipairs(e) do texts[#texts + 1] = x.text end
     local joined = table.concat(texts, "|")
     ok(e[1].header and e[1].text:find("Receipts (62)", 1, true), "receipts group titled with the receipt count: " .. e[1].text)
-    ok(e[1].right:find("+3,100", 1, true), "group rep is the receipts' rep")
-    ok(joined:find("1. Use 160 Favor you have|1. Fill 77x Journeyman Textiles|2. Buy 62x Waylaid Crate|3. Get 62x Forged Delivery Receipt", 1, true),
-        "steps in order: " .. joined)
+    eq(e[1].extra, "+3,100", "group rep is the receipts' rep")
+    ok(joined:find("77x Waylaid Crate: Journeyman Textiles|62x Waylaid Crate |cff9d9d9d(empty)|r|62x Forged Delivery Receipt|", 1, true),
+        "items listed like the Favor view, no step numbers: " .. joined)
+    local howTo = e[#e]
+    eq(howTo.text, "|cff9d9d9dFill and turn in every Waylaid Crate: Journeyman Textiles for Favor. Buy 62 receipts at the Scribe "
+        .. "with that and your own Favor. Put one on each empty Waylaid Crate and turn it in.|r", "one plain how-to line from the plan")
+    eq(howTo.right, nil, "the how-to has no right column, so it wraps")
+    ok(howTo.tooltip:find("KLH Fill Crate", 1, true) and howTo.tooltip:find("Uncertified Scribe", 1, true), "its tooltip names the Scribe and the macros")
     local fill, trade
     for _, x in ipairs(e) do
-        if x.text:find("Fill", 1, true) then fill = x end
-        if x.text:find("3. Get", 1, true) then trade = x end
+        if x.text:find("Journeyman Textiles", 1, true) and x.right then fill = x end
+        if x.text:find("Forged Delivery Receipt", 1, true) then trade = x end
     end
+    eq(trade.itemID, 262902, "the receipt row shows the receipt's item tooltip")
     ok(fill.tooltip:find("20 Wool Cloth", 1, true), "fill step names the bundle: " .. fill.tooltip)
-    ok(fill.right:find("+770 Favor", 1, true), fill.right)
-    ok(trade.right:find("+3,100", 1, true) and not trade.right:find("%dc"), "trade step: rep, no cost: " .. trade.right)
+    eq(fill.extra, "+770 Favor")
+    eq(trade.extra, "+3,100", "receipt row: rep"); eq(trade.right, nil, "and no cost")
     ok(trade.tooltip:find("930 Favor", 1, true) and trade.tooltip:find("Uncertified Scribe", 1, true), trade.tooltip)
 end
 
@@ -379,9 +386,17 @@ do
     } }
     local prices = { [1] = 100, [2] = 30, [3] = 100, [10] = 7, [11] = 2 }
     local out = P.RepriceLines(rp, prices, { owned = { [2] = 1, [11] = 25 }, onQuest = {} }, rb)
-    eq(out.lines[1].cost, 100, "first writ uses the owned item")
+    eq(out.lines[1].cost, 130, "the writ that uses the owned item still pays its value")
     eq(out.lines[2].cost, 130, "the owned item is not counted twice")
-    eq(out.lines[3].cost, 3 * 7 + (60 - 25) * 2, "owned bundle items cut the fill cost")
+    eq(out.lines[3].cost, 3 * 7 + 60 * 2, "owned bundle items count at full value")
+    eq(out.ownValue, 30 + 25 * 2, "owned value is the owned items used, at their price")
+
+    local banked = P.RepriceLines(rp, prices, { owned = { [2] = 1, [11] = 25 }, bags = { [2] = 1, [11] = 5 }, onQuest = {} }, rb)
+    eq(banked.fromBank[11], 20, "bags are used first, the rest comes from the bank")
+    eq(banked.fromBank[2], nil, "items all in bags need no bank trip")
+    eq(banked.lines[3].fromBank, 20, "the line notes its bank part")
+    eq(banked.lines[1].fromBank, nil)
+    eq(banked.cost, out.cost, "where an item sits does not change the cost")
 
     local function reason(fields)
         local r = { mode = "rep", target = 500, cands = { unpriced = {} }, input = {},
@@ -421,4 +436,123 @@ do
     texts = {}
     for _, x in ipairs(e) do texts[#texts + 1] = x.text end
     ok(table.concat(texts, "|"):find("(only 3 listed at last scan)", 1, true), "marks added later are read live")
+end
+
+do
+    local bcrate = { itemID = 10, name = "Artisan Curiosities" }
+    local bundle = { itemID = 11176, name = "Dream Dust", count = 20 }
+    local bwrit = { writID = 1, itemID = 14343, item = "Small Brilliant Shard", qty = 4, questID = 7, name = "Shards" }
+    local bplan = { cost = 0, gain = 0, short = 0, lines = {
+        { kind = "writ", ref = bwrit, count = 1, cost = 0, gain = 50, zone = "Z" },
+        { kind = "crate", ref = bcrate, count = 2, owned = true, cost = 0, gain = 40 },
+    } }
+    local input = { owned = { [11176] = 13, [14343] = 4 }, bags = { [11176] = 4 }, onQuest = {}, bankAt = 1000 }
+    local bmap = { [bcrate] = bundle }
+    local priced = P.RepriceLines(bplan, { [1] = 500, [11176] = 100, [14343] = 50 }, input, bmap)
+    eq(priced.fromBank[11176], 9); eq(priced.fromBank[14343], 4)
+    eq(priced.ownValue, 13 * 100 + 4 * 50)
+    eq(P.BankText(priced, bmap, {}), "4 Small Brilliant Shard, 9 Dream Dust", "bank list in bplan order")
+    eq(P.BankText({ lines = bplan.lines }, bmap, {}), nil, "no bank list without bank use")
+    eq(P.CostSplit(priced), "Cost 47s 00c: buy 32s 00c, your mats 15s 00c")
+    eq(P.BankAge(1000, 1000 + 3600), "", "fresh bank scan says nothing")
+    eq(P.BankAge(1000, 1000 + 86400), " (bank seen 1 day ago)")
+    eq(P.BankAge(1000, 1000 + 3 * 86400), " (bank seen 3 days ago)")
+    eq(P.BankAge(nil, 5), "")
+
+    local r = { mode = "rep", target = 90, input = input, bundleOf = bmap, plan = priced,
+        options = { { level = 0, plan = priced } }, selected = 1, cands = { unpriced = {} } }
+    local btext = P.Summary(r).text
+    ok(btext:find("Get from your bank first: 4 Small Brilliant Shard, 9 Dream Dust", 1, true), "summary lists the bank trip")
+    ok(btext:find("your mats 15s", 1, true), "summary splits the cost")
+    local all = {}
+    for _, e in ipairs(P.Entries(r)) do all[#all + 1] = e.text end
+    local joined = table.concat(all, "|")
+    ok(joined:find("(4 from bank)", 1, true), "writ line notes its bank part")
+    ok(joined:find("(9 from bank)", 1, true), "crate line notes its bank part")
+    local tip = P.PlanLines(r, r.options[1])
+    local found = {}
+    for _, l in ipairs(tip) do found[l.left] = l end
+    ok(found["  Your mats"] and found["  To buy"], "tooltip splits the cost")
+    ok(has(tip, nil, nil, function(l) return l.warn and l.left:find("Get from your bank first", 1, true) end), "tooltip warns about the bank")
+end
+
+do
+    local tipCrate = { itemID = 30, name = "Expert Ingots" }
+    local emptyRef = { itemID = 31, name = "Apprentice Herbs" }
+    local lines = {
+        { kind = "crate", ref = tipCrate, count = 2, owned = true, cost = 10, gain = 60 },
+        { kind = "receipt", count = 3, bought = 2, crateRef = emptyRef, cost = 5, gain = 150 },
+    }
+    local favorRows = P.Entries({ mode = "favor", input = { owned = {}, onQuest = {} }, bundleOf = {}, plan = { lines = { lines[1] } } })
+    local crateRow = find(favorRows, "text", nil, function(x) return x.text:find("Expert Ingots", 1, true) end)
+    eq(crateRow.itemID, 30, "a crate row shows the crate's item tooltip")
+    local repRows = P.Entries({ mode = "rep", input = { owned = {}, onQuest = {} }, bundleOf = {}, plan = { lines = lines } })
+    local fill = find(repRows, "text", nil, function(x) return x.text:find("2x Waylaid Crate: Expert Ingots", 1, true) and x.right end)
+    local buy = find(repRows, "text", nil, function(x) return x.text:find("2x Waylaid Crate: Apprentice Herbs", 1, true) end)
+    eq(fill.itemID, 30, "the receipt step's fill row shows the crate")
+    eq(buy.itemID, 31, "the buy row shows the empty crate")
+end
+
+do
+    local savedNames = rawget(_G, "C_Item")
+    _G.C_Item = nil
+    eq(P.WritName({ writID = 1, name = "Big Bronze Knife" }), "Craftsman's Writ: Big Bronze Knife", "writ fallback is the full name")
+    eq(P.CrateName({ itemID = 2, name = "Expert Ore" }), "Waylaid Crate: Expert Ore", "crate fallback is the full name")
+    eq(P.CrateName({ itemID = 3, name = "Waylaid Crate", labeled = false }), "Waylaid Crate", "the unlabeled crate keeps its own name")
+    _G.C_Item = { GetItemNameByID = function(id) return id == 2 and "Waylaid Crate: Expert Ore (game)" or nil end }
+    eq(P.CrateName({ itemID = 2, name = "Expert Ore" }), "Waylaid Crate: Expert Ore (game)", "the game's cached name wins")
+    eq(P.ItemLabel(9, "Dream Dust"), "Dream Dust", "uncached items use the fallback")
+    _G.C_Item = savedNames
+end
+
+do
+    local rowA = { itemID = 10, name = "A" }
+    local rowB = { itemID = 12, name = "B" }
+    local plain = { itemID = 13, name = "Waylaid Crate", labeled = false }
+    local buyRef = { itemID = 14, name = "D" }
+    local fillMat = { itemID = 20, name = "Dust", count = 5 }
+    local data = { WaylaidCrates = { rowA, rowB }, UnlabeledCrate = plain }
+    local cplan = { cost = 0, gain = 0, short = 0, lines = {
+        { kind = "crate", ref = rowA, count = 2, owned = true, cost = 0, gain = 40 },
+        { kind = "receipt", count = 5, bought = 1, crateRef = buyRef, cost = 0, gain = 250 },
+    } }
+    local prices = { [10] = 50, [12] = 60, [13] = 70, [14] = 80, [20] = 3 }
+    local owned = { [10] = 3, [12] = 2, [13] = 1, [20] = 10 }
+    local bmap = { [rowA] = fillMat }
+    local allBags = P.RepriceLines(cplan, prices, { owned = owned, onQuest = {}, data = data }, bmap)
+    eq(allBags.fromBank, nil, "crates and empties in bags need no bank trip")
+    local split = P.RepriceLines(cplan, prices,
+        { owned = owned, bags = { [10] = 1, [13] = 1, [20] = 10 }, onQuest = {}, data = data }, bmap)
+    eq(split.lines[1].fromBank, 1, "owned labeled crate: bags first, the rest from the bank")
+    eq(split.lines[2].fromBank, 3, "owned empties: bags of every empty crate type first, then the bank")
+    eq(split.fromBank[10], 2, "one owned crate and one empty of the same type from the bank")
+    eq(split.fromBank[12], 2, "then the next empty crate type in data order")
+    eq(split.fromBank[13], nil, "the unlabeled crate in the bags is used first")
+    eq(split.cost, allBags.cost, "owned crates and empties stay free wherever they sit")
+    eq(split.lines[1].cost, 2 * 5 * 3, "owned crate: fill only")
+    eq(split.lines[2].cost, 80, "receipts: only the bought empty")
+    eq(P.BankText(split, bmap, {}), "2 Waylaid Crate: A, 2 Waylaid Crate: B", "bank list names the crates")
+
+    local r = { mode = "rep", target = 250, input = { owned = owned, onQuest = {}, data = data }, bundleOf = bmap, plan = split,
+        options = { { level = 0, plan = split } }, selected = 1, cands = { unpriced = {} } }
+    local joined = {}
+    for _, e in ipairs(P.Entries(r)) do joined[#joined + 1] = e.text end
+    joined = table.concat(joined, "|")
+    ok(joined:find("4x empty crates you have |cffff8800(3 from bank)|r", 1, true), "the owned empties row notes its bank part: " .. joined)
+    ok(joined:find("2x Waylaid Crate: A |cff9d9d9d(owned)|r |cffff8800(1 from bank)|r", 1, true), "owned crate row: " .. joined)
+
+    local howTo = P.ReceiptHowTo({ receipt = split.lines[2], lines = split.lines }, r)
+    ok(howTo:find("Put one on each empty crate and turn it in.", 1, true), "mixed empties: generic crate: " .. howTo)
+    local allBought = { kind = "receipt", count = 3, bought = 3, crateRef = buyRef }
+    ok(P.ReceiptHowTo({ receipt = allBought, lines = { allBought } }, { plan = { lines = {} } }):find("each empty Waylaid Crate: D", 1, true),
+        "all empties bought: their type is named")
+    local noneBought = { kind = "receipt", count = 3, bought = 0 }
+    ok(P.ReceiptHowTo({ receipt = noneBought, lines = { noneBought } }, { plan = { lines = {} } }):find("each empty crate and", 1, true))
+
+    local shown = { cost = 0, gain = 0, short = 0, lines = { { kind = "crate", ref = rowA, count = 1, owned = false, cost = 0, gain = 20 } },
+        fromBank = { [20] = 5 } }
+    local rv = { mode = "favor", target = 20, input = { owned = {}, onQuest = {} }, bundleOf = {}, plan = shown, selected = 1,
+        options = { { level = 0, plan = shown } }, cands = { unpriced = {} } }
+    rv.view = setmetatable({ plan = shown, bundleOf = bmap, input = { owned = {}, onQuest = {} } }, { __index = rv })
+    ok(P.Summary(rv).text:find("Get from your bank first: 5 Dust", 1, true), "summary reads the bundles of the shown option's round")
 end

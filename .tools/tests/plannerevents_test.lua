@@ -75,6 +75,7 @@ local good, problem = pcall(function()
     ns.GetSettings = function() return { countBank = false } end
     ns.RegisterFeature = function(s) spec = s end
     ns.RegisterSlashCommand = function(_, fn) slash = fn end
+    addon("Modules/WritCrateHistory.lua")
     addon("Modules/WritCratePlanner.lua")
 
     _G.Auctionator = { API = { v1 = {} } }

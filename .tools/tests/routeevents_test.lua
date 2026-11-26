@@ -51,11 +51,6 @@ local TomTom = {
     end,
 }
 
-local pinClears = 0
-local questiePins = {
-    AddWorldMapIconMap = function() end,
-    RemoveAllWorldMapIcons = function() pinClears = pinClears + 1 end,
-}
 local player = { wx = 0, wy = 0 }
 local now, onTaxi, mounted, runSpeed = 100, false, false, 7
 local faction = { [10] = 2, [20] = 2 }
@@ -63,7 +58,6 @@ local printed = {}
 Stub({
     TomTom = TomTom, KLH_CharDB = {},
     LibStub = function() return nil end,
-    QuestieLoader = { ImportModule = function(_, name) if name == "HBDPins" then return questiePins end end },
     WorldMapFrame = { IsShown = function() return false end },
     C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end },
     CreateFrame = function() return frame end,
@@ -151,9 +145,7 @@ local function TwoLegs()
     return { start = Point("start", "Start", 0, 0), route = { Leg("Nia", 9.5, { 1 }), Leg("Bo", 9.7, { 2, 3 }) } }
 end
 
-eq(pinClears, 0)
 eq(RP.Start(TwoLegs(), { waypoints = "add" }), 4, "two transits and two stops")
-ok(pinClears > 0, "Questie HBDPins used when the HereBeDragons-Pins library is missing")
 local one, two = entries[1].data, entries[2].data
 ok(one.transit[1].uid ~= two.transit[1].uid, "same flight in two legs keeps two waypoints")
 ok(one.transit[1].uid.title:find("^1%. Fly to B"), one.transit[1].uid.title)

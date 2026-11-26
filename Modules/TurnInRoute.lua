@@ -156,7 +156,7 @@ ns.RegisterFeature({
     title = "Turn-in Route",
     tab = "helpers",
     description = "Adds a world map button that draws the fastest route to every quest and writ ready to turn in, with flights, ships and zeppelins, optionally your hearthstone and mage teleports, numbered map markers and TomTom waypoints.",
-    help = "Plans the fastest route to every quest ready to turn in and every writ you can hand in, with flights, ships, zeppelins and, if enabled below, your hearthstone and mage teleports. Open the world map and click the checkmark button: left-click plans everything, right-click picks Quests, Writs or Abort route. In the route list, click a stop to point the TomTom arrow there; Ctrl+click drops it.",
+    help = "Plans the fastest route to every quest and writ ready to turn in. Click the checkmark on the world map (right-click to pick Quests or Writs); in the route list, click a stop to point TomTom there, Ctrl+click to drop it.",
     defaults = { useHearth = false, useTeleports = false, waypoints = "add" },
     requires = { "Questie" },
     optional = { "TomTom" },

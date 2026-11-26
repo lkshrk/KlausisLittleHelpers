@@ -6,7 +6,7 @@ local P = ns.WritPlanner
 
 local KEY = "WritCratePlanner"
 local PAD = 8
-local WIDTH = 340
+local WIDTH = 420
 local FRIENDLY = 5
 local STEPS = { [4] = 3000, [5] = 6000, [6] = 12000, [7] = 21000 }
 local STANDING_NAMES = { "Hated", "Hostile", "Unfriendly", "Neutral", "Friendly", "Honored", "Revered", "Exalted" }
@@ -65,25 +65,37 @@ local function CrateItemName(ref)
     return ref.labeled == false and ref.name or CRATE_PREFIX .. ref.name
 end
 
+--- Every item label in the planner is the game's full item name; ours is only the fallback until the item is cached.
+function P.ItemLabel(itemID, fallback)
+    return ItemName(itemID, fallback)
+end
+
+function P.WritName(ref)
+    return ItemName(ref.writID, WRIT_PREFIX .. ref.name)
+end
+
+function P.CrateName(ref)
+    return ItemName(ref.itemID, CrateItemName(ref))
+end
+
 function P.FormatMoney(copper)
     copper = math.floor((copper or 0) + 0.5)
-    local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
-    if g > 0 then
-        if c > 0 then return ("%sg %02ds %02dc"):format(P.FormatNumber(g), s, c) end
-        return ("%sg %02ds"):format(P.FormatNumber(g), s)
+    if copper >= 10000 then
+        local silver = math.floor((copper + 50) / 100)
+        return ("%sg %02ds"):format(P.FormatNumber(math.floor(silver / 100)), silver % 100)
     end
+    local s, c = math.floor(copper / 100), copper % 100
     if s > 0 then return ("%ds %02dc"):format(s, c) end
     return ("%dc"):format(c)
 end
 
---- Items to buy for a plan as { itemID, name, count } terms; bundleOf maps a crate row to its fill bundle.
-function P.ShoppingTerms(plan, owned, bundleOf, onQuest)
+local function Terms(plan, bundleOf, onQuest)
     local terms, at = {}, {}
-    local function add(itemID, name, count, minusOwned)
+    local function add(itemID, name, count, minusOwned, mat)
         if not (itemID and name) or count <= 0 then return end
         local t = at[itemID]
         if not t then
-            t = { itemID = itemID, name = name, count = 0, minusOwned = minusOwned }
+            t = { itemID = itemID, name = name, count = 0, minusOwned = minusOwned, mat = mat }
             at[itemID] = t
             terms[#terms + 1] = t
         end
@@ -93,15 +105,48 @@ function P.ShoppingTerms(plan, owned, bundleOf, onQuest)
         local ref = line.ref
         if line.kind == "writ" then
             if not (onQuest and onQuest[ref.questID]) then add(ref.writID, WRIT_PREFIX .. ref.name, line.count, true) end
-            add(ref.itemID, ref.item, (ref.qty or 1) * line.count, true)
+            add(ref.itemID, ref.item, (ref.qty or 1) * line.count, true, true)
         elseif line.kind == "crate" then
             if not line.owned then add(ref.itemID, CrateItemName(ref), line.count, false) end
             local bundle = bundleOf and bundleOf[ref]
-            if bundle then add(bundle.itemID, bundle.name, bundle.count * line.count, true) end
+            if bundle then add(bundle.itemID, bundle.name, bundle.count * line.count, true, true) end
         elseif line.kind == "receipt" and line.crateRef then
             add(line.crateRef.itemID, CrateItemName(line.crateRef), line.bought or 0, false)
         end
     end
+    return terms
+end
+
+function P.OwnedMats(plan, owned, bundleOf, onQuest)
+    local out = {}
+    for _, t in ipairs(Terms(plan, bundleOf, onQuest)) do
+        local used = t.mat and math.min(t.count, owned and owned[t.itemID] or 0) or 0
+        if used > 0 then out[t.itemID] = used end
+    end
+    return out
+end
+
+function P.BankText(plan, bundleOf, onQuest)
+    local from = plan.fromBank
+    if not from then return nil end
+    local parts, listed = {}, {}
+    local function part(id, name)
+        local n = from[id]
+        if listed[id] or not (n and n > 0) then return end
+        listed[id] = true
+        parts[#parts + 1] = ("%d %s"):format(n, ItemName(id, name))
+    end
+    for _, t in ipairs(Terms(plan, bundleOf, onQuest)) do part(t.itemID, t.name) end
+    local rest = {}
+    for id in pairs(plan.bankNames or {}) do rest[#rest + 1] = id end
+    table.sort(rest)
+    for _, id in ipairs(rest) do part(id, plan.bankNames[id]) end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+function P.ShoppingTerms(plan, owned, bundleOf, onQuest)
+    local terms = Terms(plan, bundleOf, onQuest)
     local out = {}
     for _, t in ipairs(terms) do
         local n = t.count - (t.minusOwned and owned and owned[t.itemID] or 0)
@@ -130,15 +175,20 @@ local function StandingName(id)
 end
 P.StandingName = StandingName
 
+local function EmptyCrateRows(data)
+    local rows = {}
+    for _, row in ipairs(data and data.WaylaidCrates or {}) do rows[#rows + 1] = row end
+    if data and data.UnlabeledCrate then rows[#rows + 1] = data.UnlabeledCrate end
+    return rows
+end
+
 function P.EmptyCrates(input)
     local ownedEmpty, bestCost, bestRow = 0, nil, nil
-    local function consider(row)
+    for _, row in ipairs(EmptyCrateRows(input.data)) do
         ownedEmpty = ownedEmpty + (input.owned[row.itemID] or 0)
         local cost = input.prices[row.itemID]
         if cost and (not bestCost or cost < bestCost) then bestCost, bestRow = cost, row end
     end
-    for _, row in ipairs(input.data.WaylaidCrates) do consider(row) end
-    if input.data.UnlabeledCrate then consider(input.data.UnlabeledCrate) end
     return ownedEmpty, bestCost, bestRow
 end
 
@@ -265,12 +315,98 @@ local function ReceiptInput(input, standing, settings, cands)
     }
 end
 
-local function RepOptions(r, settings)
-    local S, input, cands = ns.WritSearch, r.input, r.cands
+local function BundlesOf(cands)
+    local bundleOf = {}
+    for _, c in ipairs(cands.crates) do bundleOf[c.ref] = c.fillBundle end
+    return bundleOf
+end
+
+local function CheapestRep(r, input, cands, settings)
     local receipts = ReceiptInput(input, r.standing, settings, cands)
     local toFriendly = P.GainTo(r.standing, FRIENDLY)
     local cap = ns.WritState.PastFriendly(input.observed) == 0 and toFriendly or nil
-    local plan = S.RepPlan(cands.writs, r.target, receipts, cap)
+    return ns.WritSearch.RepPlan(cands.writs, r.target, receipts, cap), receipts, cap
+end
+
+local function CheapestPlan(r, input, cands, settings)
+    if r.mode == "favor" then return ns.WritSearch.FavorPlan(cands.crates, r.target) end
+    return CheapestRep(r, input, cands, settings)
+end
+
+function P.CheapestAt(r, prices, settings)
+    local input = {}
+    for k, v in pairs(r.input) do input[k] = v end
+    input.prices = prices
+    local cands = ns.WritState.BuildCandidates(input)
+    local plan = CheapestPlan(r, input, cands, settings or Settings())
+    if not plan or #plan.lines == 0 then return nil end
+    return P.RepriceLines(plan, prices, input, BundlesOf(cands))
+end
+
+local function Unit(plan)
+    return plan.gain > 0 and plan.cost / plan.gain or nil
+end
+
+local function MedianUnit(r, dayPrices, settings, baseShort)
+    local units = {}
+    for _, day in ipairs(dayPrices) do
+        local plan = P.CheapestAt(r, day.prices, settings)
+        local unit = plan and plan.short <= baseShort and Unit(plan)
+        if unit then units[#units + 1] = unit end
+    end
+    return ns.WritHistory.Median(units)
+end
+
+local function PlanItemIDs(r, plan)
+    local ids = {}
+    for _, t in ipairs(Terms(plan, r.bundleOf, r.input.onQuest)) do ids[#ids + 1] = t.itemID end
+    return ids
+end
+
+local function JudgeLevels(options, usualUnit, settings, unitOf)
+    local byLevel = {}
+    for _, o in ipairs(options) do
+        local unit = unitOf(o)
+        local verdict = unit and ns.WritHistory.Verdict(unit, usualUnit, settings)
+        if verdict then byLevel[o.level] = { tier = verdict.tier, pct = verdict.pct, unit = unit } end
+    end
+    return byLevel
+end
+
+function P.PriceCheck(r, settings, history)
+    local H = ns.WritHistory
+    if not (r.options and r.options[1]) then return nil end
+    local prices, ids = r.input.prices, {}
+    for id in pairs(prices) do ids[#ids + 1] = id end
+    history = history or H.ReadHistory(ids)
+    if not next(history) then return { reason = "none" } end
+    local today = H.Today()
+    local typical, anyDays = H.TypicalPrices(history, today, settings.historyDays, prices)
+    if anyDays == 0 then return { reason = "none" } end
+    local first = r.options[1]
+    local days = H.DaysCovered(history, PlanItemIDs(first.from or r, first.plan), today, settings.historyDays)
+    if days < math.min(settings.minDays, settings.historyDays) then return { reason = "few", days = days } end
+
+    local baseShort = r.options[1].plan.short or 0
+    local usualUnit
+    if settings.priceMethod == "days" then
+        usualUnit = MedianUnit(r, H.DayPrices(history, today, settings.historyDays, prices), settings, baseShort)
+        if not usualUnit then return { reason = "short" } end
+    else
+        local usual = P.CheapestAt(r, typical, settings)
+        if not usual then return { reason = "empty" } end
+        if (usual.short or 0) > baseShort then return { reason = "short" } end
+        usualUnit = Unit(usual)
+        if not usualUnit then return { reason = "empty" } end
+    end
+
+    local byLevel = JudgeLevels(r.options, usualUnit, settings, function(o) return Unit(o.plan) end)
+    return { method = settings.priceMethod == "days" and "days" or "typical", days = days, usualUnit = usualUnit, byLevel = byLevel }
+end
+
+local function RepOptions(r, settings)
+    local S, input, cands = ns.WritSearch, r.input, r.cands
+    local plan, receipts, cap = CheapestRep(r, input, cands, settings)
     local options = {}
     for _, level in ipairs(LEVELS) do
         local copy = {}
@@ -292,9 +428,8 @@ local function Calculate(prices, base)
     local cands = ns.WritState.BuildCandidates(input)
     local standing = ns.WritState.Standing()
     local mode = base and base.mode or state.mode
-    local r = { mode = mode, input = input, cands = cands, standing = standing, bundleOf = {},
+    local r = { mode = mode, input = input, cands = cands, standing = standing, bundleOf = BundlesOf(cands),
         reset = P.ResetText(DailyReset()) }
-    for _, c in ipairs(cands.crates) do r.bundleOf[c.ref] = c.fillBundle end
     r.allDone = #cands.writs == 0 and #cands.unpriced == 0 and next(input.doneToday) ~= nil
     if base then
         r.target = base.target
@@ -304,7 +439,7 @@ local function Calculate(prices, base)
     if not r.target or r.target <= 0 then return r end
 
     if mode == "favor" then
-        local plan = P.RepriceLines(ns.WritSearch.FavorPlan(cands.crates, r.target), input.prices, input, r.bundleOf)
+        local plan = P.RepriceLines(CheapestPlan(r, input, cands, settings), input.prices, input, r.bundleOf)
         SetOptions(r, { { level = 0, plan = plan } })
     else
         RepOptions(r, settings)
@@ -349,31 +484,36 @@ end
 local function BaseEntry(line, r)
     local ref = line.ref
     if line.kind == "writ" then
-        local tip = ("Requests %d %s. Turn in to %s"):format(ref.qty or 1, ref.item or "?", ref.npc or "?")
+        local tip = ("Requests %d %s. Turn in to %s"):format(ref.qty or 1, P.ItemLabel(ref.itemID, ref.item or "?"), ref.npc or "?")
         if ref.x and ref.y then tip = tip .. (" in %s (%.1f, %.1f)."):format(ref.zone or "?", ref.x, ref.y) else tip = tip .. "." end
-        return { text = ref.name .. OwnedNote(line, r.input), right = P.FormatMoney(line.cost) .. GREY .. ("  +%d|r"):format(line.gain),
-            tooltip = tip }
+        return { text = P.WritName(ref) .. OwnedNote(line, r.input), right = P.FormatMoney(line.cost), extra = ("+%d"):format(line.gain),
+            tooltip = tip, itemID = ref.writID }
     elseif line.kind == "crate" then
-        local text = ("%dx %s"):format(line.count, ref.name) .. (line.owned and (" " .. GREY .. "(owned)|r") or "")
+        local text = ("%dx %s"):format(line.count, P.CrateName(ref)) .. (line.owned and (" " .. GREY .. "(owned)|r") or "")
         local bundle = r.bundleOf[ref]
-        local tip = bundle and ("Fill each with %d %s."):format(bundle.count, bundle.name) or nil
+        local tip = bundle and ("Fill each with %d %s."):format(bundle.count, P.ItemLabel(bundle.itemID, bundle.name)) or nil
         if line.confirmed == false then
             text = text .. UNCONFIRMED
             tip = (tip and tip .. "\n" or "") .. CRATE_TIP
         end
-        return { text = text, right = P.FormatMoney(line.cost) .. GREY .. ("  +%s Favor|r"):format(P.FormatNumber(line.gain)),
-            tooltip = tip }
+        return { text = text, right = P.FormatMoney(line.cost), extra = ("+%s Favor"):format(P.FormatNumber(line.gain)),
+            tooltip = tip, itemID = ref.itemID }
     end
     return {
         text = ("%dx Forged Delivery Receipt"):format(line.count),
-        right = P.FormatMoney(line.cost) .. GREY .. ("  +%s|r"):format(P.FormatNumber(line.gain)),
+        right = P.FormatMoney(line.cost), extra = ("+%s"):format(P.FormatNumber(line.gain)),
         tooltip = RECEIPT_TIP,
     }
 end
 
+local function BankNote(line)
+    if not line.fromBank then return "" end
+    return " " .. ORANGE .. ("(%d from bank)"):format(line.fromBank) .. "|r"
+end
+
 local function LineEntry(line, r)
     local entry = BaseEntry(line, r)
-    entry.text = entry.text .. ShortNote(line, r)
+    entry.text = entry.text .. BankNote(line) .. ShortNote(line, r)
     return entry
 end
 
@@ -416,41 +556,75 @@ function P.Groups(plan, mode)
     return groups, #groups > 1 or (groups[1] and groups[1].title ~= OTHER_GROUP)
 end
 
+local MACRO_TIP = "The KLH Fill Crate and KLH Receipt macros do the filling and the receipts one key press at a time "
+    .. "(Writ & Crate Planner settings, Create macros)."
+
+local function NameList(names)
+    if #names <= 1 then return names[1] or "" end
+    return table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names]
+end
+
+function P.ReceiptHowTo(g, r)
+    local receipt, favor = g.receipt, r.plan.favor
+    local fills, seen = {}, {}
+    for _, line in ipairs(g.lines) do
+        local name = line.kind == "crate" and P.CrateName(line.ref)
+        if name and not seen[name] then
+            seen[name] = true
+            fills[#fills + 1] = name
+        end
+    end
+    local count = receipt.count or 0
+    local own = favor and favor.fromBalance > 0
+    local parts = {}
+    if #fills > 0 then parts[#parts + 1] = ("Fill and turn in every %s for Favor."):format(NameList(fills)) end
+    local pay = #fills > 0 and (own and "that and your own Favor" or "that Favor") or "your Favor"
+    parts[#parts + 1] = ("Buy %s at the Scribe with %s."):format(Plural(count, "receipt"), pay)
+    local bought = receipt.bought or 0
+    local target = bought > 0 and bought == count and receipt.crateRef and "empty " .. P.CrateName(receipt.crateRef) or "empty crate"
+    parts[#parts + 1] = ("Put one on each %s and turn it in."):format(target)
+    return table.concat(parts, " ")
+end
+
 function P.ReceiptSteps(g, r)
     local receipt, favor, rows = g.receipt, r.plan.favor, {}
-    if favor and favor.fromBalance > 0 then
-        rows[#rows + 1] = { text = ("1. Use %s Favor you have"):format(P.FormatNumber(favor.fromBalance)),
-            tooltip = "Merchant's Favor you already have pays for part of the receipts." }
-    end
     for _, line in ipairs(g.lines) do
         if line.kind == "crate" then
             local bundle = r.bundleOf[line.ref]
-            local tip = bundle and ("Fill each with %d %s and turn it in at the camp for Favor."):format(bundle.count, bundle.name)
+            local tip = bundle and ("Fill each with %d %s and turn it in at the camp for Favor."):format(bundle.count,
+                P.ItemLabel(bundle.itemID, bundle.name))
                 or "Fill each and turn it in at the camp for Favor."
             if line.confirmed == false then tip = tip .. "\n" .. CRATE_TIP end
             rows[#rows + 1] = {
-                text = ("1. Fill %dx %s"):format(line.count, line.ref.name) .. (line.owned and (" " .. GREY .. "(owned)|r") or "")
-                    .. (line.confirmed == false and UNCONFIRMED or "") .. ShortNote(line, r),
-                right = P.FormatMoney(line.cost) .. GREY .. ("  +%s Favor|r"):format(P.FormatNumber(line.gain)), tooltip = tip,
+                text = ("%dx %s"):format(line.count, P.CrateName(line.ref)) .. (line.owned and (" " .. GREY .. "(owned)|r") or "")
+                    .. (line.confirmed == false and UNCONFIRMED or "") .. BankNote(line) .. ShortNote(line, r),
+                right = P.FormatMoney(line.cost), extra = ("+%s Favor"):format(P.FormatNumber(line.gain)), tooltip = tip,
+                itemID = line.ref.itemID,
             }
         end
     end
     local bought = receipt.bought or 0
     if bought > 0 then
-        local name = receipt.crateRef and receipt.crateRef.name or "empty crate"
-        rows[#rows + 1] = { text = ("2. Buy %dx %s"):format(bought, name) .. ShortNote(receipt, r), right = P.FormatMoney(receipt.cost),
-            tooltip = "Empty crates to put the receipts on." }
+        local name = receipt.crateRef and P.CrateName(receipt.crateRef) or "Waylaid Crate"
+        rows[#rows + 1] = { text = ("%dx %s"):format(bought, name) .. " " .. GREY .. "(empty)|r" .. ShortNote(receipt, r),
+            right = P.FormatMoney(receipt.cost), tooltip = "Empty crates to put the receipts on.",
+            itemID = receipt.crateRef and receipt.crateRef.itemID }
     end
     local own = (receipt.count or 0) - bought
     if own > 0 then
-        rows[#rows + 1] = { text = ("2. Use %d empty crate%s you have"):format(own, own == 1 and "" or "s"),
+        rows[#rows + 1] = { text = ("%dx empty crate%s you have"):format(own, own == 1 and "" or "s") .. BankNote(receipt),
             tooltip = "Empty crates you already carry take a receipt each." }
     end
     local need = favor and favor.need or (receipt.count or 0) * 15
     rows[#rows + 1] = {
-        text = ("3. Get %dx Forged Delivery Receipt"):format(receipt.count or 0),
-        right = GREY .. ("+%s|r"):format(P.FormatNumber(receipt.gain or 0)),
+        text = ("%dx Forged Delivery Receipt"):format(receipt.count or 0),
+        extra = ("+%s"):format(P.FormatNumber(receipt.gain or 0)),
         tooltip = SCRIBE_TIP:format(P.FormatNumber(need), Plural(receipt.count or 0, "Forged Delivery Receipt")),
+        itemID = ns.Data.DeliveryReceipt,
+    }
+    rows[#rows + 1] = {
+        text = GREY .. P.ReceiptHowTo(g, r) .. "|r",
+        tooltip = SCRIBE_TIP:format(P.FormatNumber(need), Plural(receipt.count or 0, "Forged Delivery Receipt")) .. "\n\n" .. MACRO_TIP,
     }
     return rows
 end
@@ -459,9 +633,8 @@ local function GroupTitle(g)
     return ("%s (%d)"):format(g.title, g.count)
 end
 
-local function GroupSummary(g)
-    if g.gain > 0 then return P.FormatMoney(g.cost) .. GREY .. ("  +%s|r"):format(P.FormatNumber(g.gain)) end
-    return P.FormatMoney(g.cost)
+local function GroupExtra(g)
+    if g.gain > 0 then return ("+%s"):format(P.FormatNumber(g.gain)) end
 end
 
 --- view: nil shows every group open; otherwise only the groups in view.open are open.
@@ -472,7 +645,7 @@ function P.Entries(r, view)
         local closed = headed and view ~= nil and not (view.open and view.open[g.title])
         if headed then
             entries[#entries + 1] = { text = (closed and "+ " or "- ") .. GroupTitle(g), header = true, data = { group = g.title },
-                right = GroupSummary(g) }
+                right = P.FormatMoney(g.cost), extra = GroupExtra(g) }
         end
         if not closed then
             local rows = g.receipt and P.ReceiptSteps(g, r) or nil
@@ -495,6 +668,35 @@ end
 
 local function Zones(n)
     return n == 1 and "1 zone" or ("%d zones"):format(n)
+end
+
+local function ColorCode(rgb)
+    return ("|cff%02x%02x%02x"):format(math.floor(rgb[1] * 255 + 0.5), math.floor(rgb[2] * 255 + 0.5), math.floor(rgb[3] * 255 + 0.5))
+end
+
+local YOUNG_DAYS = 10
+
+function P.YoungNote(pc)
+    local days = pc and pc.days
+    if not days or days >= YOUNG_DAYS then return "" end
+    return " " .. GREY .. ("(%d day%s)"):format(days, days == 1 and "" or "s") .. "|r"
+end
+
+function P.PricePct(pc, level)
+    local v = pc and pc.byLevel and pc.byLevel[level]
+    if not v then return nil end
+    return ColorCode(ns.WritHistory.TIER_COLOR[v.tier]) .. ("%+d%%"):format(math.floor(v.pct * 100 + 0.5)) .. "|r"
+end
+
+local PRICE_REASON = {
+    none = "No price history",
+    empty = "No usual price for this target",
+    short = "No usual price for this target",
+}
+
+local function PriceReason(pc)
+    if pc.reason == "few" then return ("Not enough price history (%d days)"):format(pc.days or 0) end
+    return PRICE_REASON[pc.reason]
 end
 
 function P.Summary(r)
@@ -525,7 +727,10 @@ function P.Summary(r)
         return nil
     elseif Planned(r) then
         local plan = r.plan
-        if plan.favor then add(GREY .. P.FavorText(plan.favor) .. "|r") end
+        local v = r.view or r
+        local bank = P.BankText(plan, v.bundleOf, v.input and v.input.onQuest)
+        if bank then add(ORANGE .. "Get from your bank first: " .. bank .. P.BankAge(r.input and r.input.bankAt) .. "|r") end
+        if (plan.ownValue or 0) > 0 then add(GREY .. P.CostSplit(plan) .. "|r") end
         if plan.short > 0 then
             add(ORANGE .. ("Reaches +%s of +%s today; %s %s left for another day."):format(P.FormatNumber(plan.gain),
                 P.FormatNumber(r.target), P.FormatNumber(plan.short), unit) .. "|r")
@@ -552,10 +757,18 @@ function P.Summary(r)
     return { text = table.concat(lines, "\n") }
 end
 
-function P.FavorText(favor)
-    if favor.fromBalance <= 0 then return ("Uses %s Favor, all from crates"):format(P.FormatNumber(favor.need)) end
-    return ("Uses %s Favor: %s you have, %s from crates"):format(P.FormatNumber(favor.need), P.FormatNumber(favor.fromBalance),
-        P.FormatNumber(math.max(0, favor.need - favor.fromBalance)))
+function P.BankAge(scannedAt, now)
+    now = now or (_G.time and _G.time())
+    if not (scannedAt and now) then return "" end
+    local days = math.floor((now - scannedAt) / 86400)
+    if days < 1 then return "" end
+    return (" (bank seen %d day%s ago)"):format(days, days == 1 and "" or "s")
+end
+
+function P.CostSplit(plan)
+    local own = plan.ownValue or 0
+    return ("Cost %s: buy %s, your mats %s"):format(P.ShortMoney(plan.cost), P.ShortMoney(math.max(0, (plan.cost or 0) - own)),
+        P.ShortMoney(own))
 end
 
 function P.Frontier(options)
@@ -577,11 +790,7 @@ function P.Frontier(options)
 end
 
 function P.ShortMoney(copper)
-    copper = math.floor((copper or 0) + 0.5)
-    local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
-    if g > 0 then return ("%dg %02ds"):format(g, s) end
-    if s > 0 then return ("%ds %02dc"):format(s, c) end
-    return ("%dc"):format(c)
+    return P.FormatMoney(copper)
 end
 
 function P.OptionLabel(r, i)
@@ -599,7 +808,22 @@ function P.PlanLines(r, o, title)
     local lines = { { left = title or "Plan", gold = true } }
     local function stat(name, value) lines[#lines + 1] = { left = name, right = value, label = true } end
     stat("Cost", P.FormatMoney(plan.cost))
+    if (plan.ownValue or 0) > 0 then
+        stat("  To buy", P.FormatMoney(math.max(0, plan.cost - plan.ownValue)))
+        stat("  Your mats", P.FormatMoney(plan.ownValue))
+    end
     stat("Gain", ("+%s %s"):format(P.FormatNumber(plan.gain or 0), unit))
+    local pc = r.priceCheck
+    if pc then
+        local pct = P.PricePct(pc, o.level)
+        local value = pct and (pct .. P.YoungNote(pc)) or PriceReason(pc)
+        if value then stat("Price check", value) end
+        local v = pct and pc.byLevel[o.level]
+        if v then
+            stat("  Per " .. unit, P.FormatMoney(v.unit))
+            stat("  Usual", P.FormatMoney(pc.usualUnit))
+        end
+    end
     if plan.zones and r.mode ~= "favor" then stat("Zones", tostring(plan.zones)) end
     if o.buys then stat("Items to buy", tostring(o.buys)) end
     local favor = plan.favor
@@ -611,9 +835,12 @@ function P.PlanLines(r, o, title)
     if (plan.short or 0) > 0 then
         lines[#lines + 1] = { left = ("Reaches +%s of +%s today."):format(P.FormatNumber(plan.gain), P.FormatNumber(r.target)), warn = true }
     end
+    local bank = P.BankText(plan, (o.from or r).bundleOf, (o.from or r).input and (o.from or r).input.onQuest)
+    if bank then lines[#lines + 1] = { left = "Get from your bank first: " .. bank, warn = true } end
     lines[#lines + 1] = { left = " " }
     for _, g in ipairs((P.Groups(plan, r.mode))) do
-        lines[#lines + 1] = { left = GroupTitle(g), right = GroupSummary(g) }
+        local extra = GroupExtra(g)
+        lines[#lines + 1] = { left = GroupTitle(g), right = P.FormatMoney(g.cost) .. (extra and (GREY .. "  " .. extra .. "|r") or "") }
     end
     return lines
 end
@@ -627,10 +854,14 @@ function P.OptionRows(r)
         local text = label
         if (plan.short or 0) > 0 then text = text .. " " .. ORANGE .. "(short)|r" end
         local loading = r.progress ~= nil
+        local v = r.priceCheck and r.priceCheck.byLevel and r.priceCheck.byLevel[o.level]
+        local file = v and ns.WritHistory.TIER_ICON[v.tier]
+        local color = file and ns.WritHistory.TIER_COLOR[v.tier]
         rows[#rows + 1] = {
-            text = text, right = P.FormatMoney(plan.cost) .. GREY .. "  " .. extra .. "|r",
+            text = text, right = P.FormatMoney(plan.cost), extra = extra,
             data = not loading and i or nil, selected = i == r.selected or nil,
             tooltipLines = not loading and P.PlanLines(r, o, label) or nil,
+            icon = file and { file = file, r = color[1], g = color[2], b = color[3] } or nil,
         }
     end
     return rows
@@ -696,6 +927,15 @@ function P.Footer(r)
         end
         if r.writsCapped then
             add(r.receipts and "Writs give no rep past Friendly; receipts cover the rest." or "Writs give no rep past Friendly.")
+        end
+        local pc = r.priceCheck
+        if pc then
+            if pc.method then
+                add(("Price check: %s, %d days"):format(pc.method == "days" and "Past days" or "Typical prices", pc.days or 0))
+            else
+                local reason = PriceReason(pc)
+                if reason then add(reason) end
+            end
         end
     end
     if r.cands.lowLevel and r.mode == "rep" then add("Writs need level 10.", "warn") end
@@ -836,33 +1076,78 @@ local function RNeeds(r)
     return all
 end
 
---- Prices each line with prices, drawing owned items from one pool across all lines like the shopping list.
+-- Owned mats still cost their price so options compare at full value.
 function P.RepriceLines(plan, prices, input, bundleOf)
-    local onQuest, left = input.onQuest or {}, {}
+    local onQuest, left, bags = input.onQuest or {}, {}, {}
     for id, n in pairs(input.owned or {}) do left[id] = n end
+    for id, n in pairs(input.bags or input.owned or {}) do bags[id] = n end
+    local fromBank, bankNames, ownValue = {}, {}, 0
     local function take(id, n)
         local used = math.min(n, left[id] or 0)
         left[id] = (left[id] or 0) - used
-        return n - used
+        local inBags = math.min(used, bags[id] or 0)
+        bags[id] = (bags[id] or 0) - inBags
+        local banked = used - inBags
+        if banked > 0 then fromBank[id] = (fromBank[id] or 0) + banked end
+        return n - used, used, banked
+    end
+    local function takeEmpties(n)
+        local rows, banked = EmptyCrateRows(input.data), 0
+        for _, row in ipairs(rows) do
+            local inBags = math.min(n, bags[row.itemID] or 0, left[row.itemID] or 0)
+            if inBags > 0 then
+                take(row.itemID, inBags)
+                n = n - inBags
+            end
+        end
+        for _, row in ipairs(rows) do
+            if n <= 0 then break end
+            local missing, _, b = take(row.itemID, n)
+            n = missing
+            if b > 0 then
+                banked = banked + b
+                bankNames[row.itemID] = CrateItemName(row)
+            end
+        end
+        return banked
+    end
+    local function mat(id, n)
+        local missing, used, banked = take(id, n)
+        local price = prices[id]
+        if price then ownValue = ownValue + price * used end
+        local cost = price and price * n or (missing == 0 and 0 or nil)
+        return cost, banked
     end
     local total, lines = 0, {}
     for i, src in ipairs(plan.lines) do
         local line = {}
         for k, v in pairs(src) do line[k] = v end
         local ref, cost = line.ref, nil
+        line.fromBank = nil
         if line.kind == "writ" then
             local count = line.count or 1
-            local writs = onQuest[ref.questID] and 0 or take(ref.writID, count)
-            local items = take(ref.itemID, (ref.qty or 1) * count)
+            local writs, writBank = 0, 0
+            if not onQuest[ref.questID] then
+                local missing, _, banked = take(ref.writID, count)
+                writs, writBank = missing, banked
+            end
+            local itemPart, itemBank = mat(ref.itemID, (ref.qty or 1) * count)
             local writPart = writs == 0 and 0 or (prices[ref.writID] and prices[ref.writID] * writs)
-            local itemPart = items == 0 and 0 or (prices[ref.itemID] and prices[ref.itemID] * items)
             if writPart and itemPart then cost = writPart + itemPart end
+            if writBank + itemBank > 0 then line.fromBank = writBank + itemBank end
         elseif line.kind == "crate" then
             local bundle, count = bundleOf[ref], line.count or 1
-            local need = bundle and take(bundle.itemID, bundle.count * count)
-            local fill = need and (need == 0 and 0 or (prices[bundle.itemID] and prices[bundle.itemID] * need))
+            local fill, banked
+            if bundle then fill, banked = mat(bundle.itemID, bundle.count * count) end
             local buy = line.owned and 0 or (prices[ref.itemID] and prices[ref.itemID] * count)
             if fill and buy then cost = fill + buy end
+            banked = banked or 0
+            if line.owned then
+                local _, _, crateBank = take(ref.itemID, count)
+                if crateBank > 0 then bankNames[ref.itemID] = CrateItemName(ref) end
+                banked = banked + crateBank
+            end
+            if banked > 0 then line.fromBank = banked end
         elseif line.kind == "receipt" then
             local bought = line.bought or 0
             local price = bought > 0 and line.crateRef and prices[line.crateRef.itemID]
@@ -872,9 +1157,29 @@ function P.RepriceLines(plan, prices, input, bundleOf)
         total = total + (line.cost or 0)
         lines[i] = line
     end
+    for _, line in ipairs(lines) do
+        local own = line.kind == "receipt" and (line.count or 0) - (line.bought or 0) or 0
+        if own > 0 then
+            local banked = takeEmpties(own)
+            if banked > 0 then line.fromBank = banked end
+        end
+    end
     local out = {}
     for k, v in pairs(plan) do out[k] = v end
-    out.lines, out.cost = lines, total
+    out.lines, out.cost, out.ownValue = lines, total, ownValue
+    out.fromBank = next(fromBank) and fromBank or nil
+    out.bankNames = next(bankNames) and bankNames or nil
+    return out
+end
+
+function P.RejudgeAtScan(pc, r, scan, settings)
+    if not (pc and pc.usualUnit and r.options) then return pc end
+    local out = {}
+    for k, v in pairs(pc) do out[k] = v end
+    out.byLevel = JudgeLevels(r.options, pc.usualUnit, settings, function(o)
+        local from = o.from or r
+        return Unit(P.RepriceLines(o.plan, scan, from.input, from.bundleOf))
+    end)
     return out
 end
 
@@ -900,6 +1205,7 @@ local function FinishDepth(run)
     local r = run.seen[#run.seen] or run.base
     r.stamp = run.base.stamp
     if #options > 0 or buys then SetOptions(r, options, buys) end
+    r.priceCheck = P.RejudgeAtScan(run.base.priceCheck, r, run.scan, Settings())
     r.progress = nil
     last = r
     Show(r)
@@ -1026,6 +1332,7 @@ Render = function()
         return
     end
     local r = Calculate()
+    r.priceCheck = P.PriceCheck(r, Settings())
     local secs, now = DailyReset(), Now()
     r.stamp = { cur = cur, resetAt = secs and now and now + secs or nil }
     last = r
@@ -1350,16 +1657,27 @@ local function OptionToggle(order, name, key, desc)
     }
 end
 
+local function PriceRange(order, name, min, max, desc, key)
+    return {
+        type = "range", order = order, name = name, desc = desc, min = min, max = max, step = 1,
+        get = function() return Settings()[key] end,
+        set = function(_, v) Settings()[key] = v end,
+    }
+end
+
 ns.RegisterFeature({
     key = KEY,
     title = "Writ & Crate Planner",
     tab = "helpers",
     description = "Plans the cheapest Craftsman's Writs and Waylaid Crates for a trade camp rep or Merchant's Favor target from Auctionator prices, and turns the plan into an Auctionator shopping list.",
-    help = "Finds the cheapest way to gain trade camp reputation or Merchant's Favor from Craftsman's Writs, Waylaid Crates and Forged Delivery Receipts, using your latest Auctionator prices and what you already carry. At the auction house, click the Writ Planner button (or type /klh writs anywhere), enter a target and click Search, pick one of the options, then click Create Auctionator list to shop for it. Create macros in these settings makes two macros that put receipts on crates and fill crates.",
+    help = "Finds the cheapest writs, crates and delivery receipts for a reputation or Merchant's Favor target from your Auctionator prices. At the auction house, click Writ Planner (or type /klh writs), enter a target and click Search. Create macros adds macros that apply receipts and fill crates.",
     requires = { "Auctionator" },
     alwaysOn = true,
     commands = { "writs" },
-    defaults = { countBank = true, useFavorForReceipts = false, liveMinQty = 10 },
+    defaults = {
+        countBank = false, useFavorForReceipts = false, liveMinQty = 10,
+        priceMethod = "typical", historyDays = 14, minDays = 5, cheapBelow = 15, highAbove = 15, dontBuyAbove = 50,
+    },
     enable = function()
         RegisterObservers()
         local auc = Api()
@@ -1416,7 +1734,7 @@ ns.RegisterFeature({
     options = function()
         return {
             countBank = OptionToggle(1, "Count bank items", "countBank",
-                "Counts items in your bank as owned. The bank is read each time you open it."),
+                "Counts items in your bank as owned and lists what to take out of the bank before you buy. Owned items still count at their AH price, so options compare fairly. The bank is read each time you open it."),
             useFavorForReceipts = OptionToggle(2, "Spend my Favor on receipts", "useFavorForReceipts",
                 "Spends the Merchant's Favor you have on Forged Delivery Receipts before filling crates for the rest. Off: receipts are still planned when they are cheaper, but all their Favor comes from filled crates and your own Favor is kept."),
             liveMinQty = {
@@ -1426,9 +1744,22 @@ ns.RegisterFeature({
                 get = function() return Settings().liveMinQty or LIVE_MIN_QTY end,
                 set = function(_, v) Settings().liveMinQty = v end,
             },
-            macroRow = { type = "description", order = 9, name = "", width = "full" },
+            priceHeader = { type = "header", order = 4, name = "Price check" },
+            priceMethod = {
+                type = "select", order = 5, name = "Usual price from",
+                desc = "How the usual cost per rep or Favor is worked out from Auctionator's price history. Typical prices: the median daily low of each item. Past days: the plan priced for each past day, then the median of those costs.",
+                values = { typical = "Typical prices", days = "Past days" },
+                get = function() return Settings().priceMethod end,
+                set = function(_, v) Settings().priceMethod = v end,
+            },
+            historyDays = PriceRange(6, "History days", 3, 21, "How many days of price history count as usual.", "historyDays"),
+            minDays = PriceRange(7, "Minimum days", 2, 14, "Fewest days of price history needed before a verdict is shown.", "minDays"),
+            cheapBelow = PriceRange(8, "Cheap below (%)", 5, 50, "Marks a plan Cheap when it costs at least this much less than usual.", "cheapBelow"),
+            highAbove = PriceRange(9, "High above (%)", 5, 100, "Marks a plan High when it costs more than this much above usual.", "highAbove"),
+            dontBuyAbove = PriceRange(10, "Don't buy above (%)", 20, 200, "Marks a plan Don't buy when it costs more than this much above usual.", "dontBuyAbove"),
+            macroRow = { type = "description", order = 19, name = "", width = "full" },
             macros = {
-                type = "execute", order = 10, name = "Create macros",
+                type = "execute", order = 20, name = "Create macros",
                 desc = "Makes the general (account-wide) macros \"KLH Receipt\" (each press puts the next Forged Delivery Receipt on the next "
                     .. "empty Waylaid Crate) and \"KLH Fill Crate\" (each press fills the next labeled crate from a stack that covers "
                     .. "one of its bundles), then opens the macro window so you can drag them to your action bars. /klh writs macros does the same.",

@@ -44,6 +44,7 @@ ns.FEATURE_CLIENTS = {
     TurnInRoute = "forever",
     WritCratePlanner = "forever",
     SoulstoneReminder = "forever",
+    LayerPrompt = "forever",
 }
 
 function ns.ClientAllows(key, isForever)

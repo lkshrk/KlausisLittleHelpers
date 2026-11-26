@@ -43,8 +43,9 @@ function W.BuildCandidates(input)
             if not done[row.questID] then
                 local haveWrit = onQuest[row.questID] or (owned[row.writID] or 0) > 0
                 local writPart = haveWrit and 0 or prices[row.writID]
-                local missing = math.max(0, (row.qty or 1) - (owned[row.itemID] or 0))
-                local itemPart = missing == 0 and 0 or prices[row.itemID] and prices[row.itemID] * missing
+                local qty = row.qty or 1
+                local itemPart = prices[row.itemID] and prices[row.itemID] * qty
+                if not itemPart and (owned[row.itemID] or 0) >= qty then itemPart = 0 end
                 if writPart and itemPart then
                     out.writs[#out.writs + 1] = {
                         ref = row, cost = writPart + itemPart, rep = ObservedRep(input.observed, row.tier) or row.rep,
@@ -246,10 +247,13 @@ function W.Snapshot(settings)
     local level = _G.UnitLevel and _G.UnitLevel("player")
     if type(level) == "number" and level > 0 then input.level = level end
 
-    CountBags((W.ContainerIDs(_G)), input.owned)
+    input.bags = {}
+    CountBags((W.ContainerIDs(_G)), input.bags)
+    for itemID, n in pairs(input.bags) do input.owned[itemID] = n end
     if settings and settings.countBank then
         local bank = CharData().bank
         if bank then
+            input.bankAt = bank.scannedAt
             for itemID, n in pairs(bank) do
                 if type(itemID) == "number" then input.owned[itemID] = (input.owned[itemID] or 0) + n end
             end

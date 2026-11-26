@@ -293,7 +293,7 @@ ns.RegisterFeature({
     requires = { "Tust_EUI", "EllesmereUI" },
     alwaysOn = true,
     description = "Adds session XP and an all-time XP/hour to TustUI's Enhanced XP Bar.",
-    help = "Adds the XP you gained this session and an all-time XP per hour to TustUI's Enhanced XP Bar. Turn on the Enhanced XP Bar in TustUI; the extra text appears on the bar itself. Pick below which XP per hour the bar shows.",
+    help = "Adds session XP and an all-time XP per hour to TustUI's Enhanced XP Bar; turn that bar on in TustUI.",
     defaults = {
         showSessionXP = true,
         rateSource = "session",

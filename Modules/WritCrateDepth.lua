@@ -63,6 +63,9 @@ function D.PlanCost(plan, owned, listings, scanPrices, bundleOf, onQuest)
         if not prices[itemID] then return nil end
         cost = cost + prices[itemID] * n
     end
+    for itemID, n in pairs(ns.WritPlanner.OwnedMats(plan, owned, bundleOf, onQuest)) do
+        cost = cost + (prices[itemID] or 0) * n
+    end
     return cost
 end
 

@@ -44,3 +44,5 @@ scripts/release.sh patch|minor|major   # tags X.Y.Z (no v prefix) and pushes bra
 ```
 
 The release workflow packages the tag with the BigWigs packager once CI passes on that commit. The TOC keeps `## Version: @project-version@`; the packager fills it from the tag, and `scripts/sync.sh` writes the `git describe` version (or `dev-<sha>` before the first tag, `-dirty` with uncommitted changes) into the copied TOC.
+
+The CurseForge project description is a short permanent text that links to the README; CurseForge has no API to update it, so it is not kept in sync. Per-release changes reach CurseForge through the changelog the packager uploads with each file. Wago reads the README on its own.

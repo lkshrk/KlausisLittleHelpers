@@ -1,4 +1,4 @@
-local names = { "CreateFrame", "C_Timer", "GetTime", "C_Item", "C_Container", "C_Reputation", "C_CurrencyInfo",
+local names = { "time", "CreateFrame", "C_Timer", "GetTime", "C_Item", "C_Container", "C_Reputation", "C_CurrencyInfo",
     "UnitFactionGroup", "UnitLevel", "KLH_CharDB", "Auctionator", "InCombatLockdown", "C_QuestLog", "print",
     "C_EventUtils", "C_AuctionHouse", "AuctionHouseFrame" }
 local saved = {}
@@ -41,6 +41,7 @@ end
 
 local good, problem = pcall(function()
     _G.print = function() end
+    _G.time = os.time
     addon("Core/Core.lua")
     _G.CreateFrame = function(kind) return NewFrame(kind) end
     _G.C_Timer = { After = function(delay, fn) timers[#timers + 1] = { delay = delay, fn = fn } end }
@@ -94,10 +95,12 @@ local good, problem = pcall(function()
         window.SetEntries = function(self, entries, summary, pinned) self.entries, self.summary, self.pinned = entries, summary, pinned end
         return window
     end
-    local settings = { countBank = false, liveMinQty = 1 }
+    local settings = { countBank = false, liveMinQty = 1, priceMethod = "typical", historyDays = 14, minDays = 5,
+        cheapBelow = 15, highAbove = 15, dontBuyAbove = 50 }
     ns.GetSettings = function() return settings end
     ns.RegisterFeature = function(s) spec = s end
     ns.RegisterSlashCommand = function(_, fn) slash = fn end
+    addon("Modules/WritCrateHistory.lua")
     addon("Modules/WritCratePlanner.lua")
 
     local A, B
@@ -182,7 +185,18 @@ local good, problem = pcall(function()
     eq(#window.entries, 0, "Favor view stays idle")
     btns.Rep.fn()
     editBox:SetText("125")
+    local today = ns.WritHistory.Today()
+    local rows = {}
+    for d = 1, 6 do rows[#rows + 1] = { rawDay = tostring(today - d), minSeen = 40 } end
+    _G.Auctionator.Database = { GetPriceHistory = function(_, key)
+        for _, id in ipairs({ A.itemID, A.writID, B.itemID, B.writID }) do
+            if key == tostring(id) then return rows end
+        end
+        return {}
+    end }
     recalc()
+    local baseCheck = ns.WritPlanner.LastResult().priceCheck
+    ok(baseCheck ~= nil and baseCheck.reason == nil, "scan result carries a real verdict")
     eq(window.entries[1] and window.entries[1].text, "Cheapest", "options listed while loading")
     eq(actionsOn[2].on, false, "Create list disabled while calculating"); eq(btns.Search.text, "Cancel", "Cancel while calculating")
     eq(window.entries[1].tooltipLines, nil, "no popup while calculating")
@@ -200,7 +214,23 @@ local good, problem = pcall(function()
         end
     end
     Answer()
+    local done = ns.WritPlanner.LastResult()
+    local pc = done.priceCheck
+    eq(pc.usualUnit, baseCheck.usualUnit, "usual unit kept by the finished depth run")
+    eq(pc.days, baseCheck.days); eq(pc.method, baseCheck.method)
     ok(FirstRow():find(B.name, 1, true), "replanned onto the writ that is really cheaper")
+    for _, o in ipairs(done.options) do
+        local from = o.from or done
+        local plan = ns.WritPlanner.RepriceLines(o.plan, scan, from.input, from.bundleOf)
+        local v = pc.byLevel[o.level]
+        ok(v ~= nil, "verdict for the shown option at level " .. tostring(o.level))
+        ok(v and math.abs(v.unit - plan.cost / plan.gain) < 1e-9, "verdict judges the shown plan at scan prices")
+        local expected = ns.WritHistory.Verdict(plan.cost / plan.gain, pc.usualUnit, settings)
+        eq(v and v.tier, expected.tier); eq(v and v.pct, expected.pct)
+    end
+    local cheapest = done.options[1]
+    ok(baseCheck.byLevel[cheapest.level].unit ~= pc.byLevel[cheapest.level].unit, "the scan plan's unit is not reused for the live plan")
+    ok(window.entries[1].icon and window.entries[1].icon.file:find("chevron", 1, true), "shown option row keeps its tier icon")
     ok(not FirstRow():find("listed", 1, true), "no short mark: " .. FirstRow())
     ok(window.footer.text:find("2 items priced by their listings, 0 at Auctionator's cheapest", 1, true), window.footer.text)
     ok(window.entries[1].right:find("3s 00c", 1, true), "real total: " .. window.entries[1].right)
@@ -269,6 +299,7 @@ local good, problem = pcall(function()
     window.opts.onClick(1)
     eq(window.pinned and window.pinned[2] and window.pinned[2].data, 1, "clicking an option pins it")
     eq(window.pinned[2].selected, nil, "pinned row has no selection highlight")
+    ok(window.pinned[2].icon and window.pinned[2].icon.file:find("chevron", 1, true), "pinned row keeps its tier icon")
     eq(actionsOn[2].on, true, "still picked: Create list enabled")
     eq(window.pinned[1].data, "options", "Show other options pinned above it")
     local function Find(pred) for _, e in ipairs(window.entries) do if pred(e) then return e end end end

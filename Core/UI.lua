@@ -93,6 +93,17 @@ end
 
 local restoreHooked
 
+function UI.ShowItemTooltip(owner, itemID, extra)
+    RestoreTooltipScale()
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(itemID)
+    if extra then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(extra, 1, 1, 1, true)
+    end
+    GameTooltip:Show()
+end
+
 --- anchor: a GameTooltip anchor such as "ANCHOR_TOP"; default "ANCHOR_RIGHT".
 function UI.ShowTooltip(owner, text, anchor)
     RestoreTooltipScale()
