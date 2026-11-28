@@ -1,3 +1,4 @@
+local charStore = {}
 local names = { "EllesmereUI", "EUI_CLIENT_BLOCKED", "TustEUI", "TustEUICharacterDB", "TustUIEnhancedXPBarFrame", "KLH_CharDB",
     "hooksecurefunc", "CreateFrame", "GetTime", "UnitXP", "UnitXPMax", "UnitLevel", "GetMaxLevelForPlayerExpansion",
     "GameRulesUtil", "geterrorhandler", "C_Timer", "LibStub" }
@@ -40,7 +41,7 @@ local good, problem = pcall(function()
     _G.GameRulesUtil = nil
     _G.geterrorhandler = function() return error end
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
-    _G.KLH_CharDB = {}
+    charStore = {}
     _G.hooksecurefunc = function(t, key, hook)
         local orig = t[key]
         t[key] = function(...) local r = orig(...); hook(...); return r end
@@ -56,6 +57,7 @@ local good, problem = pcall(function()
     _G.TustEUI = {}
 
     addon("Core/Core.lua")
+    ns.CharData = function(key) charStore[key] = charStore[key] or {}; return charStore[key] end
     ns.IS_FOREVER = false
     ns.GetSettings = function() return settings end
     local spec
@@ -76,27 +78,27 @@ local good, problem = pcall(function()
     local opts = spec.options()
     local function Label() return opts.stats.name() end
     eq(Label(), "Saved: no XP yet")
-    _G.KLH_CharDB.tustXPBar.xp, _G.KLH_CharDB.tustXPBar.time = 1500, 3720
+    charStore.tustXPBar.xp, charStore.tustXPBar.time = 1500, 3720
     eq(Label(), "Saved: 1.5K XP in 1h 2m (1.5K XP/Hour)")
-    _G.KLH_CharDB.tustXPBar.xp, _G.KLH_CharDB.tustXPBar.time = 2500000, 90061
+    charStore.tustXPBar.xp, charStore.tustXPBar.time = 2500000, 90061
     eq(Label(), "Saved: 2.5M XP in 1d 1h 1m (99.9K XP/Hour)")
-    _G.KLH_CharDB.tustXPBar.xp, _G.KLH_CharDB.tustXPBar.time = 7, 30
+    charStore.tustXPBar.xp, charStore.tustXPBar.time = 7, 30
     eq(Label(), "Saved: 7 XP in < 1m (840 XP/Hour)")
     ns.IS_FOREVER = true
     eq(Label(), "Saved: abbr7 XP in < 1m (abbr840 XP/Hour)", "Forever uses EUI's abbreviation")
     ns.IS_FOREVER = false
 
-    _G.KLH_CharDB.tustXPBar.xp, _G.KLH_CharDB.tustXPBar.time = 0, 0
+    charStore.tustXPBar.xp, charStore.tustXPBar.time = 0, 0
     for _, f in ipairs(frames) do
         if f.events.PLAYER_XP_UPDATE then
             xp = 100
             f.handler(f, "PLAYER_XP_UPDATE", "player")
         end
     end
-    eq(_G.KLH_CharDB.tustXPBar.xp, 200, "level-up wrap counts the rest of the old level")
+    eq(charStore.tustXPBar.xp, 200, "level-up wrap counts the rest of the old level")
 
     settings.rateSource = "both"
-    _G.KLH_CharDB.tustXPBar.xp, _G.KLH_CharDB.tustXPBar.time = 3600, 3600
+    charStore.tustXPBar.xp, charStore.tustXPBar.time = 3600, 3600
     local function Session(gained)
         _G.TustEUICharacterDB = { enhancedXPBar = { startTime = now - 3600, gainedXP = gained } }
         rate:SetText("Leveling in: 1h 0m (1K XP/Hour)")

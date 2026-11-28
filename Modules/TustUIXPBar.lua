@@ -275,10 +275,6 @@ local function OnEvent(_, event, arg)
     end
 end
 
-local function NotifyChange()
-    _G.LibStub("AceConfigRegistry-3.0"):NotifyChange(ns.ID)
-end
-
 local function StatsLabel()
     local s = Stats()
     if s.xp <= 0 then return "Saved: no XP yet" end
@@ -328,7 +324,7 @@ ns.RegisterFeature({
                 set = function(_, v)
                     Settings().showSessionXP = v == true
                     Refresh()
-                    NotifyChange()
+                    ns.NotifyOptionsChanged()
                 end,
             },
             rateSource = {
@@ -339,7 +335,7 @@ ns.RegisterFeature({
                 set = function(_, v)
                     Settings().rateSource = v
                     Refresh()
-                    NotifyChange()
+                    ns.NotifyOptionsChanged()
                 end,
             },
             stats = { type = "description", order = 3, fontSize = "medium", width = "full", name = function() return _G.EllesmereUI and StatsLabel() or "" end },
@@ -350,7 +346,7 @@ ns.RegisterFeature({
                 func = function()
                     ResetStats()
                     Refresh()
-                    NotifyChange()
+                    ns.NotifyOptionsChanged()
                 end,
             },
         }
