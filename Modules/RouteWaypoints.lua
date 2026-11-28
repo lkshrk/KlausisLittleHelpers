@@ -22,7 +22,12 @@ local function ValidWaypoint(uid)
     return uid ~= nil and W.Has() and _G.TomTom:IsValidWaypoint(uid)
 end
 
+local function Suppressed()
+    return ns.RoutePlanner and ns.RoutePlanner.UsingShortestPath and ns.RoutePlanner.UsingShortestPath()
+end
+
 function W.ArrowTo(leg)
+    if Suppressed() then return end
     local uid = leg.uid
     for _, transit in ipairs(leg.transit) do
         if ValidWaypoint(transit.uid) then
@@ -169,6 +174,7 @@ local TRANSIT_TITLE = {
 }
 
 function W.AddLeg(leg)
+    if Suppressed() then return 0 end
     local stop, count = leg.stop, 0
     for _, step in ipairs(leg.steps) do
         local title = TRANSIT_TITLE[step.kind]

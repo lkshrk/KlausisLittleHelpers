@@ -156,6 +156,7 @@ function V.Draw()
     if not lineFrame then return end
     for _, marker in ipairs(markers) do marker:Hide() end
     for _, line in ipairs(lines) do line:Hide() end
+    if ns.RoutePlanner and ns.RoutePlanner.UsingShortestPath and ns.RoutePlanner.UsingShortestPath() then return end
     if not (RouteStart() and _G.WorldMapFrame:IsShown()) then return end
     local mapID = _G.WorldMapFrame:GetMapID()
     if not mapID then return end

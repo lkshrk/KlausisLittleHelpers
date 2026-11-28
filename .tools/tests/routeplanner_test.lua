@@ -1,4 +1,6 @@
-addon("Modules/TurnInRouteGraph.lua"); addon("Modules/RouteDraw.lua"); addon("Modules/RouteWaypoints.lua"); addon("Modules/RoutePlanner.lua")
+local charStore = {}
+addon("Modules/TurnInRouteGraph.lua"); addon("Modules/RouteDraw.lua"); addon("Modules/RouteWaypoints.lua"); ns.CharData = function(key) charStore[key] = charStore[key] or {}; return charStore[key] end
+addon("Modules/RoutePlanner.lua")
 local RP = ns.RoutePlanner
 local a = { name = "N", mapID = 1, x = 0.5, y = 0.5, quests = { "Q1" }, questIds = { 1 } }
 local b = { name = "N", mapID = 1, x = 0.5, y = 0.5, quests = { "W1" }, questIds = { 9 } }

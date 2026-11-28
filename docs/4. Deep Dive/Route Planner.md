@@ -33,7 +33,7 @@ graph TB
     TD["TaxiPaths, Transports, Teleports"]
     Q["Questie modules and HBD"]
     TT["TomTom"]
-    CD["KLH_CharDB.turnInRoute"]
+    CD["db.char.turnInRoute"]
 
     TR -->|"RegisterSource, Init, PlanSources"| RP
     TR --> Q

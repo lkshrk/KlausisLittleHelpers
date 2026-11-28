@@ -84,7 +84,15 @@ Stub({
     SlashCmdList = { ACECONSOLE_RXP = function(arg) hidden[#hidden + 1] = arg end },
 })
 local planSources = RP.PlanSources
-RP.PlanSources = function() return "Route.", true end
+local complete
+RP.PlanSources = function(_, _, done) complete = done end
+wipe(printed)
+T.Plan({ "quests" })
+eq(#printed, 0, "no message while planning")
+complete("Nothing to turn in.", false)
+eq(printed[1], "Nothing to turn in.")
+eq(#hidden, 0, "no RestedXP pause without a route")
+RP.PlanSources = function(_, _, done) done("Route.", true) end
 inCombat = true
 wipe(printed)
 T.Plan({ "quests" })

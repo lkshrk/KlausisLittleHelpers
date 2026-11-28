@@ -27,6 +27,49 @@ local continentOfInstance = {}
 local routeStart
 local useWaypoints = false
 local flightPlan
+local shortestPath = false
+local pendingUpdate = false
+local unwatch, cancelUpdate, deferredUnwatch
+local routeGeneration, updateGeneration = 0, 0
+local fallbackSettings = {}
+local planGeneration, cancelPlan = 0, nil
+local UpdateShortestPath, LeaveShortestPath, Fallback, WatchShortestPath
+local CloseConfirmation
+local confirmPopup
+local POPUP = "KLH_ROUTE_REPLACE_SHORTEST_PATH"
+
+CloseConfirmation = function()
+    if not confirmPopup then return end
+    confirmPopup = nil
+    if _G.StaticPopup_Hide then _G.StaticPopup_Hide(POPUP) end
+end
+
+local function ConfirmReplacement(_, answer)
+    CloseConfirmation()
+    if not (_G.StaticPopupDialogs and _G.StaticPopup_Show) then answer(false); return end
+    _G.StaticPopupDialogs[POPUP] = _G.StaticPopupDialogs[POPUP] or {
+        text = "Replace the current Shortest Path journey with this turn-in route?",
+        button1 = _G.YES or "Yes", button2 = _G.NO or "No",
+        OnAccept = function(_, data) if data then data.reply(true) end end,
+        OnCancel = function(_, data) if data then data.reply(false) end end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    local data = {}
+    data.reply = function(accepted)
+        if confirmPopup ~= data then return end
+        confirmPopup = nil
+        answer(accepted)
+    end
+    confirmPopup = data
+    if not _G.StaticPopup_Show(POPUP, nil, nil, data) then
+        confirmPopup = nil
+        answer(false)
+    end
+end
+
+function RP.UsingShortestPath()
+    return shortestPath
+end
 
 local function LocationKey(stop)
     return tostring(stop.mapID) .. ":" .. math.floor((stop.x or 0) * 1000 + 0.5) .. ":" .. math.floor((stop.y or 0) * 1000 + 0.5)
@@ -103,13 +146,7 @@ function RP.Active()
 end
 
 local function CharData()
-    local root = _G.KLH_CharDB
-    if type(root) ~= "table" then
-        root = {}
-        _G.KLH_CharDB = root
-    end
-    if type(root.turnInRoute) ~= "table" then root.turnInRoute = {} end
-    return root.turnInRoute
+    return ns.CharData("turnInRoute")
 end
 
 local function Plain(value)
@@ -463,7 +500,7 @@ local function SaveRoute()
         CharData().route = nil
         return
     end
-    local saved = { start = SavedPoint(routeStart), legs = {}, waypoints = useWaypoints }
+    local saved = { start = SavedPoint(routeStart), legs = {}, waypoints = useWaypoints, shortestPath = shortestPath }
     for _, leg in ipairs(legs) do
         if not leg.done then
             local stop = SavedPoint(leg.stop)
@@ -505,7 +542,10 @@ local function DropLeg(leg)
     W.RemoveLeg(leg)
     if not Refresh() and #legs > 0 then
         wipe(legs)
+        if shortestPath then UpdateShortestPath() end
         ns.Print("Turn-in route complete.")
+    elseif shortestPath then
+        UpdateShortestPath()
     end
 end
 
@@ -517,6 +557,13 @@ local function ClearRoute()
 end
 
 local function OnQuestGone(questId)
+    if cancelPlan then
+        planGeneration = planGeneration + 1
+        cancelPlan()
+        cancelPlan = nil
+        CloseConfirmation()
+        ns.Print("Turn-ins changed while planning; please plan the route again.")
+    end
     for _, leg in ipairs(legs) do
         local stop = leg.stop
         if not leg.done then
@@ -524,7 +571,12 @@ local function OnQuestGone(questId)
                 if id == questId then
                     table.remove(stop.questIds, k)
                     table.remove(stop.quests, k)
-                    if #stop.questIds == 0 then DropLeg(leg) else Refresh() end
+                    if #stop.questIds == 0 then
+                        DropLeg(leg)
+                    else
+                        Refresh()
+                        if shortestPath then UpdateShortestPath() end
+                    end
                     return
                 end
             end
@@ -533,6 +585,7 @@ local function OnQuestGone(questId)
 end
 
 function RP.Start(plan, opts)
+    if shortestPath and not (opts and opts.shortestPath) then LeaveShortestPath(true) end
     local mode = opts and opts.waypoints or false
     if not W.Has() then mode = false end
     local add = false
@@ -571,11 +624,16 @@ end
 function RP.Restore()
     local saved = CharData().route
     if type(saved) ~= "table" or type(saved.legs) ~= "table" or #legs > 0 then return end
-    local add = saved.waypoints ~= false and W.Has()
+    local sp = ns.ShortestPath
+    local status = sp and sp.Status()
+    local isSP = saved.shortestPath or (saved.shortestPath == nil and (status == "owned" or status == "pending"))
+    local add = not isSP and saved.waypoints ~= false and W.Has()
+    local changed = false
     for _, entry in ipairs(saved.legs) do
         local stop = entry.stop
         local keep = RP.RestoreKeep(stop.questIds, C_QuestLog.IsQuestFlaggedCompleted)
         if #keep < #stop.questIds then
+            changed = true
             local ids, names = {}, {}
             for _, i in ipairs(keep) do ids[#ids + 1] = stop.questIds[i]; names[#names + 1] = stop.quests[i] end
             stop.questIds, stop.quests = ids, names
@@ -588,44 +646,248 @@ function RP.Restore()
     end
     if #legs > 0 then routeStart = saved.start end
     useWaypoints = add
-    Refresh()
+    if isSP then
+        local settings = ns.GetSettings(KEY)
+        fallbackSettings = { hearth = settings.useHearth, teleports = settings.useTeleports, waypoints = settings.waypoints }
+        if settings.useShortestPath ~= false and (status == "owned" or status == "pending") and #legs > 0 then
+            shortestPath = true
+            routeGeneration = routeGeneration + 1
+            Refresh()
+            WatchShortestPath(sp)
+            if changed then UpdateShortestPath() end
+        else
+            Fallback(true)
+        end
+    else
+        Refresh()
+    end
+end
+
+local function StopWatching()
+    if unwatch then unwatch(); unwatch = nil end
+end
+
+local function CancelDeferred()
+    if deferredUnwatch then deferredUnwatch(); deferredUnwatch = nil end
+end
+
+LeaveShortestPath = function(cancelOwned)
+    local sp = ns.ShortestPath
+    shortestPath = false
+    pendingUpdate = false
+    routeGeneration = routeGeneration + 1
+    updateGeneration = updateGeneration + 1
+    if cancelUpdate then cancelUpdate(); cancelUpdate = nil end
+    StopWatching()
+    if cancelOwned and sp and not sp.CancelOwned() and sp.Status() == "pending" then
+        CancelDeferred()
+        deferredUnwatch = sp.Watch(function(status)
+            if status == "owned" then
+                sp.CancelOwned()
+                CancelDeferred()
+            elseif status == "empty" or status == "foreign" then
+                CancelDeferred()
+            end
+        end)
+    end
+end
+
+Fallback = function(cancelOwned)
+    LeaveShortestPath(cancelOwned)
+    local stops, previous = {}, {}
+    for _, leg in ipairs(legs) do
+        if not leg.done then stops[#stops + 1] = leg.stop; previous[leg.stop] = leg end
+    end
+    if #stops == 0 then Refresh(); return end
+    local plan = RP.Plan(stops, fallbackSettings)
+    local included = {}
+    for _, entry in ipairs(plan.route) do included[entry.stop] = true end
+    for _, stop in ipairs(stops) do
+        if not included[stop] then plan.route[#plan.route + 1] = { stop = stop, steps = previous[stop].steps } end
+    end
+    plan.start = plan.start or routeStart
+    RP.Start(plan, { waypoints = W.Has() and (fallbackSettings.waypoints or "add") or false })
+end
+
+WatchShortestPath = function(sp)
+    local routeToken = routeGeneration
+    unwatch = sp.Watch(function(status)
+        if not shortestPath or routeToken ~= routeGeneration then return end
+        if status == "owned" then
+            if pendingUpdate then UpdateShortestPath() end
+        elseif status ~= "pending" then
+            Fallback(true)
+        end
+    end)
+end
+
+function RP.SettingsChanged()
+    local settings = ns.GetSettings(KEY)
+    if settings.useShortestPath ~= false then return end
+    if shortestPath then
+        fallbackSettings = { hearth = settings.useHearth, teleports = settings.useTeleports, waypoints = settings.waypoints }
+        Fallback(true)
+    end
+end
+
+UpdateShortestPath = function()
+    local sp = ns.ShortestPath
+    if not shortestPath or not sp then return end
+    updateGeneration = updateGeneration + 1
+    local generation = updateGeneration
+    if cancelUpdate then cancelUpdate(); cancelUpdate = nil end
+    if #legs == 0 then LeaveShortestPath(true); return end
+    if sp.Status and sp.Status() == "pending" then pendingUpdate = true; return end
+    pendingUpdate = false
+    local route = {}
+    for _, leg in ipairs(legs) do if not leg.done then route[#route + 1] = { stop = leg.stop } end end
+    local waiting = true
+    local cancel = sp.Start({ route = route }, function(_, answer) answer(false) end, function(accepted)
+        waiting = false
+        if not shortestPath or generation ~= updateGeneration then return end
+        cancelUpdate = nil
+        if not accepted then Fallback(true) end
+    end)
+    if waiting and generation == updateGeneration then cancelUpdate = cancel end
 end
 
 function RP.Abort()
+    planGeneration = planGeneration + 1
+    if cancelPlan then cancelPlan(); cancelPlan = nil end
+    CloseConfirmation()
+    if shortestPath then LeaveShortestPath(true) end
     if #legs == 0 then return end
     ClearRoute()
     ns.Print("Turn-in route aborted.")
 end
 
-function RP.PlanSources(keys, settings)
+function RP.PlanSources(keys, settings, done, getSettings)
+    planGeneration = planGeneration + 1
+    local generation = planGeneration
+    if cancelPlan then cancelPlan(); cancelPlan = nil end
+    CloseConfirmation()
     settings = settings or {}
     local stops, unknown, _, failed = RP.Collect(keys)
-    local plan = RP.Plan(stops, { hearth = settings.useHearth, teleports = settings.useTeleports })
-    plan.count, plan.unknown = plan.count + unknown, plan.unknown + unknown
-    local message, started
-    if plan.count == 0 then
-        message = "Nothing to turn in."
-    elseif #plan.route == 0 then
-        if plan.unknown == plan.count then
-            message = ("%d turn-ins, no known location."):format(plan.count)
-        else
-            message = ("%d turn-ins, none reachable."):format(plan.count)
+    local finished = false
+    local function cancel()
+        if finished then return end
+        finished = true
+        if generation == planGeneration then
+            planGeneration = planGeneration + 1
+            if cancelPlan then cancelPlan(); cancelPlan = nil end
+            CloseConfirmation()
         end
-    else
-        local mode = W.Has() and (settings.waypoints or "add") or false
-        local waypoints = RP.Start(plan, { waypoints = mode })
-        local minutes = math.ceil(plan.total / 60)
-        if mode then
-            message = ("TomTom route: %d turn-ins, %d waypoints, about %d min."):format(plan.routed, waypoints, minutes)
-        else
-            message = ("Route: %d turn-ins, about %d min."):format(plan.routed, minutes)
-        end
-        if plan.unreachable > 0 then message = message .. (" %d unreachable."):format(plan.unreachable) end
-        if plan.unknown > 0 then message = message .. (" %d without a known turn-in location."):format(plan.unknown) end
-        started = true
     end
-    if #failed > 0 then message = message .. (" Could not read: %s."):format(table.concat(failed, ", ")) end
-    return message, started
+    local function fallback()
+        if finished or generation ~= planGeneration then return end
+        finished = true
+        cancelPlan = nil
+        local plan = RP.Plan(stops, { hearth = settings.useHearth, teleports = settings.useTeleports })
+        plan.count, plan.unknown = plan.count + unknown, plan.unknown + unknown
+        local message, started
+        if plan.count == 0 then
+            message = "Nothing to turn in."
+        elseif #plan.route == 0 then
+            if plan.unknown == plan.count then
+                message = ("%d turn-ins, no known location."):format(plan.count)
+            else
+                message = ("%d turn-ins, none reachable."):format(plan.count)
+            end
+        else
+            local mode = W.Has() and (settings.waypoints or "add") or false
+            local waypoints = RP.Start(plan, { waypoints = mode })
+            local minutes = math.ceil(plan.total / 60)
+            if mode then
+                message = ("TomTom route: %d turn-ins, %d waypoints, about %d min."):format(plan.routed, waypoints, minutes)
+            else
+                message = ("Route: %d turn-ins, about %d min."):format(plan.routed, minutes)
+            end
+            if plan.unreachable > 0 then message = message .. (" %d unreachable."):format(plan.unreachable) end
+            if plan.unknown > 0 then message = message .. (" %d without a known turn-in location."):format(plan.unknown) end
+            started = true
+        end
+        if #failed > 0 then message = message .. (" Could not read: %s."):format(table.concat(failed, ", ")) end
+        if done then done(message, started) end
+        return message, started
+    end
+    local sp = ns.ShortestPath
+    local mapID = settings.useShortestPath ~= false and sp and sp.Available() and C_Map.GetBestMapForUnit("player")
+    local position = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
+    if position and #stops > 0 and done then
+        local x, y = position:GetXY()
+        local ordering = true
+        local cancelOrder = sp.Order({ mapID = mapID, x = x, y = y }, stops, function(plan)
+            ordering = false
+            if finished or generation ~= planGeneration then return end
+            cancelPlan = nil
+            local currentSettings = getSettings and getSettings()
+            if currentSettings and (currentSettings ~= settings or currentSettings.useShortestPath == false) then
+                settings = currentSettings
+                fallback()
+                return
+            end
+            if not plan or #plan.route == 0 or not sp.Start then fallback(); return end
+            local wx, wy, instance = HBD:GetPlayerWorldPosition()
+            plan.start.kind, plan.start.name = "start", "Start"
+            plan.start.wx, plan.start.wy, plan.start.instance = wx, wy, instance
+            for _, leg in ipairs(plan.route) do
+                local stop = leg.stop
+                stop.kind, stop.zone = "stop", MapName(stop.mapID)
+                stop.wx, stop.wy, stop.instance = HBD:GetWorldCoordinatesFromZone(stop.x, stop.y, stop.mapID)
+            end
+            local waiting = true
+            local function confirmReplacement(journey, answer)
+                ConfirmReplacement(journey, function(accepted)
+                    local live = getSettings and getSettings()
+                    if generation ~= planGeneration or (live and (live ~= settings or live.useShortestPath == false)) then
+                        answer(false)
+                        return
+                    end
+                    answer(accepted)
+                end)
+            end
+            local cancelStart = sp.Start(plan, confirmReplacement, function(accepted, reason)
+                waiting = false
+                if finished or generation ~= planGeneration then return end
+                cancelPlan = nil
+                local liveSettings = getSettings and getSettings()
+                if liveSettings and (liveSettings ~= settings or liveSettings.useShortestPath == false) then
+                    if accepted then sp.CancelOwned() end
+                    settings = liveSettings
+                    fallback()
+                    return
+                end
+                if not accepted then
+                    if reason == "busy" or reason == "unknown" then
+                        ns.Print("Shortest Path journey is occupied or unavailable; using KLH guidance.")
+                    end
+                    fallback()
+                    return
+                end
+                finished = true
+                CancelDeferred()
+                if shortestPath then LeaveShortestPath(false) end
+                W.RemoveRoute()
+                shortestPath = true
+                routeGeneration = routeGeneration + 1
+                fallbackSettings = { hearth = settings.useHearth, teleports = settings.useTeleports, waypoints = settings.waypoints }
+                RP.Start(plan, { waypoints = false, shortestPath = true })
+                WatchShortestPath(sp)
+                local message = ("Shortest Path route: %d turn-ins, about %d min."):format(plan.routed, math.ceil(plan.total / 60))
+                if (plan.unreachable or 0) > 0 then message = message .. (" %d unreachable."):format(plan.unreachable) end
+                local missing = (plan.unknown or 0) + unknown
+                if missing > 0 then message = message .. (" %d without a known turn-in location."):format(missing) end
+                if #failed > 0 then message = message .. (" Could not read: %s."):format(table.concat(failed, ", ")) end
+                done(message, true)
+            end)
+            if waiting and not finished then cancelPlan = cancelStart end
+        end)
+        if ordering and not finished then cancelPlan = cancelOrder end
+    else
+        local message, started = fallback()
+        if not done then return message, started end
+    end
+    return cancel
 end
 
 local EVENTS = {

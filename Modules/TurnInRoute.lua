@@ -10,7 +10,7 @@ local T = {}
 ns.TurnInRoute = T
 
 local QuestieDB, ZoneDB, DistanceUtils
-local mapButton
+local mapButton, ready, unavailableMessage
 
 function T.ReadyWrits(writs, bagCount, onQuest)
     local stops, unknown = {}, 0
@@ -72,14 +72,14 @@ local function CollectTurnIns()
         local info = C_QuestLog.GetInfo(i)
         local id = info and not info.isHeader and info.questID
         local complete = id and id > 0 and not skip[id] and QuestieDB.IsComplete(id)
-        if complete == 1 or complete == true then
+        if info and (complete == 1 or complete == true) then
             local quest = QuestieDB.GetQuest(id)
             local spawn, areaId, name
             if quest and quest.Finisher then
                 spawn, areaId, name = DistanceUtils.GetNearestFinisherOrStarter(quest.Finisher)
             end
             local mapID = spawn and areaId and ZoneDB:GetUiMapIdByAreaId(areaId)
-            if mapID then
+            if mapID and spawn then
                 stops[#stops + 1] = {
                     name = name or "?", mapID = mapID, x = spawn[1] / 100, y = spawn[2] / 100,
                     quests = { info.title or ("Quest " .. id) }, questIds = { id },
@@ -107,9 +107,10 @@ function T.Plan(keys)
         keys = {}
         for _, source in ipairs(RP.Sources()) do keys[#keys + 1] = source.key end
     end
-    local message, started = RP.PlanSources(keys, ns.GetSettings(KEY))
-    if started and PauseRestedXP() then message = message .. " RestedXP paused, /rxp show resumes it." end
-    ns.Print(message)
+    RP.PlanSources(keys, ns.GetSettings(KEY), function(message, started)
+        if started and PauseRestedXP() then message = message .. " RestedXP paused, /rxp show resumes it." end
+        ns.Print(message)
+    end, function() return ns.GetSettings(KEY) end)
 end
 
 local function RouteTurnIns()
@@ -154,24 +155,32 @@ end
 ns.RegisterFeature({
     key = KEY,
     title = "Turn-in Route",
+    launcher = { text = "Turn-in Route", onClick = function()
+        if ready then RouteTurnIns() elseif unavailableMessage then ns.Print(unavailableMessage) end
+    end },
     tab = "helpers",
     description = "Adds a world map button that draws the fastest route to every quest and writ ready to turn in, with flights, ships and zeppelins, optionally your hearthstone and mage teleports, numbered map markers and TomTom waypoints.",
     help = "Plans the fastest route to every quest and writ ready to turn in. Click the checkmark on the world map (right-click to pick Quests or Writs); in the route list, click a stop to point TomTom there, Ctrl+click to drop it.",
-    defaults = { useHearth = false, useTeleports = false, waypoints = "add" },
+    defaults = { useHearth = false, useTeleports = false, useShortestPath = true, waypoints = "add" },
     requires = { "Questie" },
     optional = { "TomTom" },
     optionalReason = "waypoints",
     alwaysOn = true,
+    onReset = function() RP.SettingsChanged() end,
     enable = function()
         local loader = _G.QuestieLoader
-        if not (loader and loader.ImportModule and _G.WorldMapFrame) then return end
+        if not (loader and loader.ImportModule and _G.WorldMapFrame) then
+            unavailableMessage = "Turn-in Route: Questie loader or world map unavailable; route planning is off."
+            return
+        end
         QuestieDB = loader:ImportModule("QuestieDB")
         ZoneDB = loader:ImportModule("ZoneDB")
         DistanceUtils = loader:ImportModule("DistanceUtils")
         local HBD = loader:ImportModule("HBD")
         local missing = T.MissingQuestieApi({ QuestieDB = QuestieDB, ZoneDB = ZoneDB, DistanceUtils = DistanceUtils, HBD = HBD })
         if missing then
-            ns.Print("Turn-in Route: Questie changed (" .. missing .. " missing); route planning is off.")
+            unavailableMessage = "Turn-in Route: Questie changed (" .. missing .. " missing); route planning is off."
+            ns.Print(unavailableMessage)
             return
         end
         RP.RegisterSource("quests", { title = "Quests", order = 1, collect = CollectTurnIns })
@@ -179,29 +188,41 @@ ns.RegisterFeature({
         RP.Init({ hbd = HBD, onRefresh = RouteTurnIns })
         _G.WorldMapFrame:HookScript("OnShow", CreateMapButton)
         if _G.WorldMapFrame:IsShown() then CreateMapButton() end
+        ready = true
     end,
     options = function()
-        local function Setting(key, order, name, desc)
+        local shortestHint = "\n|cffffd100Disabled with Shortest Path.|r"
+        local function ShortestPathEnabled()
+            return ns.GetSettings(KEY).useShortestPath ~= false and ns.ShortestPath and ns.ShortestPath.Available()
+        end
+        local function Setting(key, order, name, desc, disabled)
             return {
                 type = "toggle", order = order, name = name, desc = desc, width = "normal",
+                disabled = disabled,
                 get = function() return ns.GetSettings(KEY)[key] == true end,
-                set = function(_, v) ns.GetSettings(KEY)[key] = v == true end,
+                set = function(_, v)
+                    ns.GetSettings(KEY)[key] = v == true
+                    if key == "useShortestPath" then RP.SettingsChanged() end
+                end,
             }
         end
         return {
             hint = { type = "description", order = 1, fontSize = "medium",
                      name = "Click the checkmark button on the world map to plan every ready turn-in. Right-click it to plan one source or abort." },
             useHearth = Setting("useHearth", 2, "Use Hearthstone",
-                "Let the route start with your hearthstone when it is bound, ready and faster."),
+                "Let the route start with your hearthstone when it is bound, ready and faster." .. shortestHint, ShortestPathEnabled),
             useTeleports = Setting("useTeleports", 3, "Use Mage Teleports",
-                "Let the route start with a known mage city teleport when you carry the Rune of Teleportation."),
+                "Let the route start with a known mage city teleport when you carry the Rune of Teleportation." .. shortestHint, ShortestPathEnabled),
+            useShortestPath = Setting("useShortestPath", 4, "Use Shortest Path",
+                "Use Shortest Path for route planning and guidance when available; otherwise use KLH guidance."),
             waypoints = {
-                type = "select", order = 4, name = "TomTom Waypoints",
+                type = "select", order = 5, name = "TomTom Waypoints",
                 desc = function()
-                    if ns.AddonLoaded("TomTom") then return "Add keeps your other waypoints. Replace clears them all first." end
-                    return ns.RequiresText({ "TomTom" }, ns.AddonTitle)
+                    local desc = ns.AddonLoaded("TomTom") and "Add keeps your other waypoints. Replace clears them all first."
+                        or ns.RequiresText({ "TomTom" }, ns.AddonTitle)
+                    return desc .. shortestHint
                 end,
-                disabled = function() return not ns.AddonLoaded("TomTom") end,
+                disabled = function() return ShortestPathEnabled() or not ns.AddonLoaded("TomTom") end,
                 values = { add = "Add to my waypoints", replace = "Replace my waypoints" }, sorting = { "add", "replace" },
                 get = function() return ns.GetSettings(KEY).waypoints or "add" end,
                 set = function(_, v) ns.GetSettings(KEY).waypoints = v end,

@@ -1,6 +1,8 @@
+local charStore = {}
 addon("Core/Core.lua"); addon("Core/Options.lua"); addon("Modules/TurnInRouteGraph.lua")
 ns.IS_FOREVER = true
-addon("Modules/RouteDraw.lua"); addon("Modules/RouteWaypoints.lua"); addon("Modules/RoutePlanner.lua"); addon("Modules/TurnInRoute.lua")
+addon("Modules/RouteDraw.lua"); addon("Modules/RouteWaypoints.lua"); ns.CharData = function(key) charStore[key] = charStore[key] or {}; return charStore[key] end
+addon("Modules/RoutePlanner.lua"); addon("Modules/TurnInRoute.lua")
 local RP = ns.RoutePlanner
 
 local touched = {}
@@ -122,7 +124,7 @@ local function OldRoute()
 end
 
 local function Restore(route)
-    _G.KLH_CharDB = { turnInRoute = { route = route } }
+    charStore = { turnInRoute = { route = route } }
     RP.Restore()
 end
 
@@ -138,8 +140,8 @@ eq(entries[1].data.steps[1].kind, "flight"); eq(entries[1].data.steps[1].hops[2]
 eq(Count("add"), 3, "one flight and one stop for leg 1, only the stop for leg 2 (flight passed)")
 ok(entries[1].data.uid ~= nil and entries[2].data.uid ~= nil, "legs hold their stop waypoint")
 eq(#entries[1].data.transit, 1); eq(#entries[2].data.transit, 0)
-eq(_G.KLH_CharDB.turnInRoute.route.waypoints, true, "route re-saved with the waypoint flag")
-eq(#_G.KLH_CharDB.turnInRoute.route.legs, 2)
+eq(charStore.turnInRoute.route.waypoints, true, "route re-saved with the waypoint flag")
+eq(#charStore.turnInRoute.route.legs, 2)
 RP.Abort()
 eq(RP.Active(), false)
 
@@ -149,7 +151,7 @@ Restore(OldRoute())
 eq(RP.Active(), true, "restores without TomTom")
 eq(#entries, 2)
 eq(#log, 0, "no TomTom call when it is absent")
-eq(_G.KLH_CharDB.turnInRoute.route.waypoints, false)
+eq(charStore.turnInRoute.route.waypoints, false)
 RP.Abort()
 
 _G.TomTom = setmetatable({}, { __index = function(_, k) log[#log + 1] = "touch:" .. k end })
@@ -180,7 +182,7 @@ local first, last = entries[1].data.stop, entries[2].data.stop
 eq(#first.questIds, 1); eq(first.questIds[1], 10); eq(#first.quests, 1); eq(first.quests[1], "QA")
 eq(last.name, "Cy"); eq(last.questIds[1], 30, "id not flagged completed is kept")
 ok(not has(entries, nil, nil, function(e) return e.data.stop.name == "Bo" end), "second stop dropped")
-eq(#_G.KLH_CharDB.turnInRoute.route.legs, 2)
+eq(#charStore.turnInRoute.route.legs, 2)
 RP.Abort()
 completed = {}
 
@@ -195,7 +197,7 @@ wipe(log)
 local message, started = RP.PlanSources({ "x" }, { waypoints = "replace" })
 ok(message:find("^Route:"), message); eq(started, true); eq(RP.Active(), true)
 eq(#log, 0, "no TomTom call")
-eq(_G.KLH_CharDB.turnInRoute.route.waypoints, false)
+eq(charStore.turnInRoute.route.waypoints, false)
 RP.Abort()
 
 _G.TomTom = TomTom
@@ -217,7 +219,7 @@ local function Kinds(plan)
     for _, step in ipairs(plan.route[1].steps) do kinds[#kinds + 1] = step.kind end
     return table.concat(kinds, ",")
 end
-_G.KLH_CharDB = { turnInRoute = { bind = { wx = 9900, wy = 0, instance = 0, name = "Inn Town" } } }
+charStore = { turnInRoute = { bind = { wx = 9900, wy = 0, instance = 0, name = "Inn Town" } } }
 local walk = RP.Plan(Far(), { hearth = false })
 eq(Kinds(walk), "ground", "useHearth = false gives no shortcut")
 local hearth = RP.Plan(Far(), { hearth = true })
@@ -246,9 +248,9 @@ eq(Kinds(RP.Plan(Far(), { hearth = true })), "hearth,ground", "cooldown over")
 bind.name = "Elsewhere"
 eq(Kinds(RP.Plan(Far(), { hearth = true })), "ground", "bind location changed since it was recorded")
 bind.name = "Inn Town"
-_G.KLH_CharDB.turnInRoute.bind = nil
+charStore.turnInRoute.bind = nil
 eq(Kinds(RP.Plan(Far(), { hearth = true })), "ground", "no recorded bind")
-_G.KLH_CharDB.turnInRoute.bind = { wx = 9900, wy = 0, instance = 0, name = "Inn Town" }
+charStore.turnInRoute.bind = { wx = 9900, wy = 0, instance = 0, name = "Inn Town" }
 
 RP.RegisterSource("far", { title = "Far", order = 2, collect = Far })
 _G.TomTom = nil
@@ -271,6 +273,97 @@ local function Build()
     return result.args.helpers.args.TurnInRoute
 end
 ok(ns.features.TurnInRoute ~= nil, "feature registered")
+local routeSpec = ns.features.TurnInRoute
+eq(routeSpec.launcher.text, "Turn-in Route")
+local before = #printed
+routeSpec.launcher.onClick()
+eq(#printed, before, "launcher is silent before enable")
+routeSpec.enable()
+routeSpec.launcher.onClick()
+ok(printed[#printed]:find("unavailable", 1, true), "missing loader explained")
+before = #printed
+local modules = {
+    QuestieDB = { IsComplete = function() end, GetQuest = function() end },
+    ZoneDB = { GetUiMapIdByAreaId = function() end },
+    DistanceUtils = { GetNearestFinisherOrStarter = function() end },
+    HBD = hbd,
+}
+Stub({ QuestieLoader = { ImportModule = function(_, name) return modules[name] end } })
+local isComplete = modules.QuestieDB.IsComplete
+modules.QuestieDB.IsComplete = nil
+routeSpec.enable()
+local failure = printed[#printed]
+routeSpec.launcher.onClick()
+eq(printed[#printed], failure, "launcher repeats Questie API failure")
+eq(#printed, before + 2, "enable and launcher report failure")
+modules.QuestieDB.IsComplete = isComplete
+routeSpec.enable()
+local originalPlan, originalSettings, originalPrint = RP.PlanSources, ns.GetSettings, ns.Print
+local profile = { useShortestPath = true }
+ns.GetSettings = function() return profile end
+ns.Print = function() end
+local plannedKeys, plannedSettings
+RP.PlanSources = function(keys, settings) plannedKeys, plannedSettings = keys, settings; return "planned", false end
+local routeOptions = routeSpec.options()
+local shortestOption = routeOptions.useShortestPath
+local originalLoaded = ns.AddonLoaded
+ns.AddonLoaded = function(name) return name == "TomTom" end
+profile.useHearth, profile.useTeleports, profile.waypoints = true, false, "replace"
+local descriptions = {
+    useHearth = "Let the route start with your hearthstone when it is bound, ready and faster.",
+    useTeleports = "Let the route start with a known mage city teleport when you carry the Rune of Teleportation.",
+    waypoints = "Add keeps your other waypoints. Replace clears them all first.",
+}
+local shortestHint = "\n|cffffd100Disabled with Shortest Path.|r"
+ns.ShortestPath = { Available = function() return true end }
+for _, key in ipairs({ "useHearth", "useTeleports", "waypoints" }) do
+    eq(routeOptions[key].disabled(), true, key .. " disabled by Shortest Path")
+    local desc = routeOptions[key].desc
+    if type(desc) == "function" then desc = desc() end
+    eq(desc, descriptions[key] .. shortestHint, key .. " keeps description and highlights disabled hint")
+end
+ns.ShortestPath.Available = function() return false end
+for _, key in ipairs({ "useHearth", "useTeleports", "waypoints" }) do
+    eq(routeOptions[key].disabled(), false, key .. " enabled when Shortest Path unavailable")
+end
+ns.ShortestPath.Available = function() return true end
+local settingsChanges, originalChanged = 0, RP.SettingsChanged
+RP.SettingsChanged = function() settingsChanges = settingsChanges + 1 end
+shortestOption.set(nil, false)
+eq(settingsChanges, 1, "option applies journey setting immediately")
+routeSpec.onReset()
+eq(settingsChanges, 2, "profile changes apply journey setting")
+RP.SettingsChanged = originalChanged
+for _, key in ipairs({ "useHearth", "useTeleports", "waypoints" }) do
+    eq(routeOptions[key].disabled(), false, key .. " enabled without Shortest Path")
+end
+eq(routeOptions.useHearth.get(), true, "hearth choice preserved")
+eq(routeOptions.useTeleports.get(), false, "teleport choice preserved")
+eq(routeOptions.waypoints.get(), "replace", "waypoint choice preserved")
+ns.AddonLoaded = function() return false end
+eq(routeOptions.waypoints.disabled(), true, "missing TomTom still disables waypoints")
+ns.AddonLoaded = originalLoaded
+profile = { useShortestPath = true }
+eq(routeOptions.useHearth.disabled(), true, "disabled state follows profile switch")
+profile = { useShortestPath = false }
+eq(routeOptions.useHearth.disabled(), false, "enabled state follows profile switch")
+profile = { useShortestPath = true }
+eq(routeSpec.defaults.useShortestPath, true, "Shortest Path enabled by default")
+eq(shortestOption.get(), true, "Shortest Path option reads current profile")
+shortestOption.set(nil, false)
+eq(profile.useShortestPath, false, "Shortest Path option writes current profile")
+routeSpec.launcher.onClick()
+eq(assert(plannedSettings).useShortestPath, false, "disabled setting reaches planner")
+profile = { useShortestPath = true }
+eq(shortestOption.get(), true, "Shortest Path option follows profile switch")
+routeSpec.launcher.onClick()
+eq(assert(plannedSettings).useShortestPath, true, "new profile reaches planner")
+routeSpec.launcher.onClick()
+local expectedKeys = {}
+for _, source in ipairs(RP.Sources()) do expectedKeys[#expectedKeys + 1] = source.key end
+eq(table.concat(assert(plannedKeys), ","), table.concat(expectedKeys, ","), "launcher plans all sources")
+RP.PlanSources, ns.Print = originalPlan, originalPrint
+profile = { useShortestPath = false }
 
 local group = Build()
 ok(group.name:find("808080", 1, true), "group greyed")
@@ -290,11 +383,11 @@ loaded.Questie = true
 group = Build()
 eq(group.desc, ns.features.TurnInRoute.description, "Questie alone ungates the group")
 eq(group.args.requires, nil)
-eq(group.args.useHearth.disabled, nil)
+eq(group.args.useHearth.disabled(), false)
 local waypoints = group.args.waypoints
 eq(type(waypoints.desc), "function")
 text = waypoints.desc()
-eq(type(text), "string"); eq(text, "Requires: TomTom")
+eq(type(text), "string"); ok(text:find("Requires: TomTom", 1, true))
 eq(waypoints.disabled(), true, "waypoint select greyed without TomTom")
 
 loaded.TomTom = true
@@ -302,5 +395,87 @@ group = Build()
 text = group.args.waypoints.desc()
 eq(type(text), "string"); ok(text:find("^Add keeps"), text)
 eq(group.args.waypoints.disabled(), false)
+ns.GetSettings = originalSettings
 
-for k, saved in pairs(touched) do _G[k] = saved[1] end
+local pending, cancelled = {}, 0
+ns.ShortestPath = {
+    Available = function() return true end,
+    Order = function(start, stops, done)
+        eq(start.mapID, 1); eq(start.x, 0.2); eq(start.y, 0.3)
+        pending[#pending + 1] = done
+        return function() cancelled = cancelled + 1 end
+    end,
+}
+_G.C_Map.GetBestMapForUnit = function() return 1 end
+_G.C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.2, 0.3 end } end
+local results = {}
+local available = ns.ShortestPath.Available
+ns.ShortestPath.Available = function() error("disabled SPF must not be queried") end
+RP.PlanSources({ "x" }, { useShortestPath = false }, function(msg, didStart) results[#results + 1] = { msg, didStart } end)
+eq(#results, 1, "disabled SPF completes with KLH fallback")
+eq(results[1][2], true, "disabled SPF starts KLH guidance")
+RP.Abort()
+results = {}
+ns.ShortestPath.Available = available
+RP.PlanSources({ "x" }, {}, function(msg, didStart) results[#results + 1] = { msg, didStart } end)
+eq(#results, 0, "planning waits for estimates")
+RP.PlanSources({ "x" }, {}, function(msg, didStart) results[#results + 1] = { msg, didStart } end)
+eq(cancelled, 1, "new request cancels old job")
+pending[1](nil, "error")
+eq(#results, 0, "stale completion ignored")
+pending[2](nil, "error")
+eq(#results, 1, "failed estimate completes once")
+eq(results[1][2], true, "failed estimate starts fallback")
+pending[2](nil, "error")
+eq(#results, 1, "completion is once only")
+RP.Abort()
+local handed, response = 0, nil
+ns.ShortestPath.Start = function(plan, _, done)
+    handed = handed + 1
+    response = done
+    return function() cancelled = cancelled + 1 end
+end
+results = {}
+RP.PlanSources({ "x" }, {}, function(msg, didStart) results[#results + 1] = { msg, didStart } end)
+local planned = RP.Plan(RP.Collect({ "x" }), {})
+pending[3](planned)
+eq(handed, 1, "ordered plan enters ownership gate")
+eq(#results, 0, "wait for ownership decision")
+assert(response)(false, "declined")
+eq(#results, 1, "decline starts fallback")
+eq(results[1][2], true)
+RP.Abort()
+local update, submitted
+Stub({
+    CreateFrame = function() return { SetScript = function(_, _, fn) update = fn end } end,
+    InCombatLockdown = function() return false end,
+    ShortestPathForever = { API = {
+        version = 1,
+        Estimate = function() return 60 end,
+        NavigateRoute = function(_, stops) submitted = stops; return true end,
+        CurrentStop = function() return nil, "none" end,
+        Journey = function() return nil, "none" end,
+        JourneyState = function() return { busy = false } end,
+        Cancel = function() return true end,
+        Active = function() end,
+        Ended = function() end,
+        Subscribe = function() return function() end end,
+    } },
+})
+addon("Modules/ShortestPath.lua")
+results = {}
+RP.PlanSources({ "x" }, {}, function(msg, didStart) results[#results + 1] = { msg, didStart } end)
+while update do update() end
+eq(results[1][2], true, "real SPF adapter starts route")
+eq(submitted[1].title, "Nia")
+ok(entries[1].text:find("Zone", 1, true), "zone rendered")
+ok(entries[1].text:find("Q1", 1, true), "quest rendered")
+local saved = charStore.turnInRoute.route
+local stop = saved.legs[1].stop
+eq(stop.kind, "stop"); eq(stop.zone, "Zone")
+eq(stop.wx, 500); eq(stop.wy, 500); eq(stop.instance, 0)
+eq(stop.quests[1], "Q1"); eq(stop.questIds[1], 1)
+eq(saved.start.kind, "start"); eq(saved.start.wx, 0); eq(saved.start.wy, 0); eq(saved.start.instance, 0)
+RP.Abort()
+ns.ShortestPath = nil
+for k, savedGlobal in pairs(touched) do _G[k] = savedGlobal[1] end
