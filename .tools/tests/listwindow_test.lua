@@ -25,7 +25,12 @@ local function Region()
     function t:ClearAllPoints() self.points = {} end
     function t:SetText(s) self.value = s end
     function t:GetStringWidth() return #(self.value or "") * 5 end
-    function t:GetStringHeight() return 12 end
+    function t:GetStringHeight()
+        if self.wrap and self.width then return 12 * math.max(1, math.ceil(#(self.value or "") * 5 / math.max(self.width, 1))) end
+        return 12
+    end
+    function t:SetHeight(height) self.height = height end
+    function t:SetVerticalScroll(v) self.scroll = v end
     function t:SetWidth(w) self.width = w end
     function t:GetWidth() return self.width end
     function t:SetSize(w, ht) self.width, self.height = w, ht end
@@ -36,7 +41,7 @@ local function Region()
     function t:Hide() self.shown = false end
     function t:SetTextColor() end
     function t:SetColorTexture() end
-    function t:SetWordWrap() end
+    function t:SetWordWrap(v) self.wrap = v end
     function t:SetJustifyH() end
     return t
 end
@@ -44,6 +49,7 @@ end
 local fill = ns.ListWindowFillRow
 local row = { text = Region(), right = Region(), sel = Region(), icon = Region() }
 fill(row, { text = "Cheapest", right = "1g", icon = { file = "x.png", r = 1, g = 0.5, b = 0 } }, 300)
+eq(row.text.wrap, true, "labels with right columns wrap")
 eq(row.icon.file, "x.png"); eq(row.icon.shown, true)
 eq(row.icon.color[1], 1); eq(row.icon.color[2], 0.5); eq(row.icon.color[3], 0)
 eq(row.text.width, 300 - 18 - 12 - 3, "left text leaves room for the icon")
@@ -117,4 +123,31 @@ eq(reused.hasIcon, false); eq(reused.hasRight, false, "a button row drops the ol
 local textWidth = reused.text.width
 align({ reused, ColRow("1g", "12 zones", true) })
 eq(reused.text.width, textWidth, "alignment leaves a button row alone")
+
+local window = ns.CreateListWindow({ width = 180 })
+window.frame, window.content, window.scroll = Region(), Region(), Region()
+window.topH = 0
+function window:Separator() return Region() end
+function window:NewRow()
+    return { text = Region(), right = Region(), extra = Region(), sel = Region(), icon = Region(),
+        SetHeight = Region().SetHeight, ClearAllPoints = Region().ClearAllPoints,
+        SetPoint = Region().SetPoint, Show = Region().Show, Hide = Region().Hide, points = {} }
+end
+window:SetFixedHeight(100)
+local label = string.rep("long item ", 7) .. "(unconfirmed)"
+local icon = { file = "x", r = 1, g = 1, b = 1 }
+window:SetEntries({ { text = label, right = "1g", icon = icon }, { text = "next", right = "2g", extra = "many zones" } }, nil,
+    { { text = label, right = "3g", icon = icon } })
+local p, a, b = window.pinRows[1], window.rows[1], window.rows[2]
+eq(p.height, p.text:GetStringHeight() + 4, "pinned row height uses aligned width")
+eq(a.height, a.text:GetStringHeight() + 4, "list row height uses aligned width")
+eq(b.points[1][5], -a.height - 4, "next row follows the full wrapped height")
+eq(window.content.height, a.height + b.height + 8, "scroll content includes wrapped rows")
+eq(window.scroll.points[1][5], -(25 + 4 + p.height + 4 + 5), "scroll starts below wrapped pin")
+window:SetEntries({ { text = "short", right = "1g" } })
+eq(window.rows[1], a, "row is recycled")
+eq(a.height, 16, "recycled row shrinks")
+eq(window.pinRows[1].shown, false, "unused pin is hidden")
+eq(window.rows[2].shown, false, "unused list row is hidden")
+eq(window.scroll.scroll, 0, "scroll resets when content fits")
 

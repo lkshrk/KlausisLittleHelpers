@@ -6,9 +6,10 @@ Two small files provide the shared look and widgets of the addon. `Core/UI.lua` 
 
 ## Responsibilities
 
-- A single accent colour and font choice (`UI.Accent()`, `UI.Font`, `UI.FontObject`); with EllesmereUI installed and its third-party skinning on, `Core/Skin.lua` swaps in EUI's accent and skins list windows with `S.Shell` (and buttons, edit boxes, panels and close buttons with EUI's matching skins).
+- A single accent colour and font choice (`UI.Accent()`, `UI.Font`, `UI.FontObject`); with EllesmereUI installed and its third-party skinning on, `Core/Skin.lua` swaps in EUI's accent and skins list windows with `S.Shell` (and buttons, edit boxes, panels close buttons, checkboxes and dropdowns with EUI's matching skins (`UI.SkinCheckbox`, `UI.SkinDropdown`)).
 - Flat texture and border helpers (`UI.Solid`, `UI.Border`).
-- Plain-text and line-list tooltips, a dropdown menu, and a context menu with a fallback for clients without `MenuUtil`.
+- Plain-text and line-list tooltips, a dropdown menu, and a context menu with a fallback for clients without `MenuUtil`. `UI.CloseMenus`, `UI.IsMenuOpen` and `UI.OnMenuClosed` manage menu state. A dropdown toggles closed when its owner is clicked again and displays at most 20 rows at once.
+- Shared number and money formatting (`UI.FormatNumber`, `UI.FormatMoney`).
 - Combat-safe deferral (`UI.Defer`).
 - A list window with header, buttons, an info icon, a summary and pinned rows above the list, rows, action buttons, remembered position, a maximum height of 60% of the screen and a mouse-wheel scroll area for longer lists.
 
@@ -67,6 +68,8 @@ classDiagram
 
 | Function | Behavior |
 |---|---|
+| `UI.FormatNumber(n)` | Rounds to the nearest integer and groups digits with commas. |
+| `UI.FormatMoney(copper)` | Rounds copper; displays gold and rounded silver from 1g, silver and copper below, or copper alone. |
 | `UI.Accent()` | Returns `0.05, 0.82, 0.62`. |
 | `UI.FontObject(size)` | The Blizzard font object for that size: `GameFontHighlightSmall` up to 11, `GameFontHighlight` up to 13, `GameFontHighlightMedium` up to 15, else `GameFontHighlightLarge`. |
 | `UI.Font(parent, size, r, g, b, a)` | Creates an OVERLAY font string with that size's font object and colour. |
@@ -75,7 +78,7 @@ classDiagram
 | `UI.ShowTooltip(owner, text, anchor?)` / `UI.HideTooltip()` | `GameTooltip` with wrapped text, anchored at `anchor` (default `ANCHOR_RIGHT`). |
 | `UI.ShowLinesTooltip(owner, lines)` | `GameTooltip` from `{ left, right?, label?, header?, gold?, grey?, warn? }` lines; scaled down when taller than 95% of the screen. |
 | `UI.DropdownMenu(anchor, items)` | Our own menu below `anchor`, exactly as wide; `items = { { text, right?, onClick }, ... }`. |
-| `UI.ContextMenu(owner, items)` | `items = { { text, isActive?, onClick }, ... }`. Uses `MenuUtil.CreateContextMenu` with radio entries, else a hand-made fallback menu. |
+| `UI.ContextMenu(owner, items)` | `items = { { text, isActive?, title?, onClick }, ... }`. Uses `MenuUtil.CreateContextMenu`: plain buttons, radio entries only for items with `isActive`, titles for `title`; else a hand-made fallback menu. |
 | `UI.Defer(key, fn)` | Runs `fn` now out of combat. In combat it stores the latest `fn` per key and runs all on `PLAYER_REGEN_ENABLED` under `xpcall`. |
 
 ### `ns.CreateListWindow(opts)`
@@ -126,3 +129,7 @@ Pure. `rowHeights` are the heights of the rows (each plus a 4 px gap), `chrome` 
 ## Potential Improvements
 
 - The window is not resizable and has no scroll bar, only the mouse wheel.
+
+## Settings widgets
+
+`Core/Widgets.lua` exposes `ns.Widgets`, the reusable settings controls used by the options window. The kit provides controls, in-place refresh and confirmation handling without an external GUI library.

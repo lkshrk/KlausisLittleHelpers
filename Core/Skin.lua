@@ -15,16 +15,16 @@ function UI.Skinned()
     return skin ~= nil
 end
 
-local function Apply(kind, frame)
+local function Apply(kind, frame, opts)
     local fn = skin and skin[kind]
-    if fn then pcall(fn, frame) end
+    if fn then pcall(fn, frame, opts) end
 end
 
-local function Skin(kind, frame)
+local function Skin(kind, frame, opts)
     if skin then
-        Apply(kind, frame)
+        Apply(kind, frame, opts)
     elseif registered then
-        pending[#pending + 1] = { kind, frame }
+        pending[#pending + 1] = { kind, frame, opts }
     end
 end
 
@@ -48,12 +48,20 @@ function UI.SkinPanel(frame)
     Skin("Panel", frame)
 end
 
+function UI.SkinCheckbox(box, opts)
+    Skin("Checkbox", box, opts)
+end
+
+function UI.SkinDropdown(button)
+    Skin("Dropdown", button)
+end
+
 local eui = _G.EllesmereUI
 if type(eui) == "table" and type(eui.RegisterSkin) == "function" then
     registered = true
     eui.RegisterSkin("KlausisLittleHelpers", function(S)
         skin = S
-        for _, p in ipairs(pending) do Apply(p[1], p[2]) end
+        for _, p in ipairs(pending) do Apply(p[1], p[2], p[3]) end
         pending = {}
     end)
 end

@@ -15,11 +15,6 @@ local function Prefix(text, desc)
     return text
 end
 
-function ns.NotifyOptionsChanged()
-    local registry = _G.LibStub and _G.LibStub("AceConfigRegistry-3.0", true)
-    if registry then registry:NotifyChange(ns.ID) end
-end
-
 local function AskReload(key)
     if ns.IsEnabled(key) == ns.WasEnabledAtLoad(key) then return end
     if _G.StaticPopup_Show then _G.StaticPopup_Show(RELOAD_POPUP) end
@@ -64,7 +59,7 @@ local function FeatureGroup(spec, index, ctx)
     local args = spec.options and spec.options(ctx.settings and ctx.settings(key)) or {}
     if not spec.alwaysOn then
         args.enabled = {
-            type = "toggle", order = 0.5, width = "full",
+            type = "toggle", order = 0.5, width = "normal",
             name = "Enable " .. spec.title, desc = spec.description,
             get = function() return ns.IsEnabled(key) end,
             set = function(_, v)
@@ -98,7 +93,6 @@ local function FeatureGroup(spec, index, ctx)
     }, requires
 end
 
--- AceConfigDialog boxes every inline group, so a section holds its features flat behind a header.
 local function AddToSection(holder, key, index, group)
     local base = index * 1000
     holder.args[key .. "_header"] = { type = "header", order = base, name = group.name }
@@ -139,7 +133,7 @@ function ns.BuildOptionsTable(features, order, ctx)
     for _, tab in ipairs(TABS) do sections[tab.key] = {} end
     for index, key in ipairs(order) do
         local spec = features[key]
-        if spec and ns.ClientAllows(spec.key, ctx.isForever) then
+        if spec and spec.key ~= "MinimapButton" and ns.ClientAllows(spec.key, ctx.isForever) then
             local group, requires = FeatureGroup(spec, index, ctx)
             local tab = sections[spec.tab] and spec.tab or "helpers"
             local name = type(spec.section) == "string" and spec.section ~= "" and spec.section or nil
@@ -169,7 +163,7 @@ function ns.BuildOptionsTable(features, order, ctx)
     local args = { general = { type = "group", order = 1, name = "General", args = general } }
     for position, tab in ipairs(TABS) do
         if next(sections[tab.key]) then
-            args[tab.key] = { type = "group", order = position + 1, name = tab.name, args = sections[tab.key] }
+            args[tab.key] = { type = "group", order = position + 1, name = tab.name, childGroups = "tree", args = sections[tab.key] }
         end
     end
     if ctx.profiles then
@@ -179,38 +173,6 @@ function ns.BuildOptionsTable(features, order, ctx)
     return { type = "group", name = ns.LABEL, childGroups = "tab", args = args }
 end
 
-function ns.CloseOptions()
-    local LS = _G.LibStub
-    local dialog = LS and LS("AceConfigDialog-3.0", true)
-    if dialog then dialog:Close(ns.ID) end
-    local panel = _G.SettingsPanel
-    if panel and panel:IsShown() then
-        if panel.Close then panel:Close(true) elseif _G.HideUIPanel then _G.HideUIPanel(panel) else panel:Hide() end
-    end
-end
-
--- AceGUI pools its Frame widget for every addon, so the backdrop only shows while ours is open.
-local function OpaqueBackground(dialog)
-    local widget = dialog.OpenFrames and dialog.OpenFrames[ns.ID]
-    local frame = widget and widget.frame
-    if not (frame and frame.CreateTexture) then return end
-    if not frame.klhBackground then
-        local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-        bg:SetColorTexture(0.06, 0.06, 0.07, 0.97)
-        bg:SetPoint("TOPLEFT", 8, -8)
-        bg:SetPoint("BOTTOMRIGHT", -8, 8)
-        frame.klhBackground = bg
-        frame:HookScript("OnHide", function(self) self.klhBackground:Hide() end)
-    end
-    frame.klhBackground:Show()
-end
-
-function ns.OpenOptions()
-    local dialog = _G.LibStub("AceConfigDialog-3.0")
-    dialog:Open(ns.ID)
-    OpaqueBackground(dialog)
-end
-
 local function RegisterReloadPopup()
     if not _G.StaticPopupDialogs then return end
     _G.StaticPopupDialogs[RELOAD_POPUP] = {
@@ -218,7 +180,7 @@ local function RegisterReloadPopup()
         button1 = "Reload",
         button2 = "Later",
         OnAccept = function() _G.ReloadUI() end,
-        -- Blizzard resets the strata on every show; the options window sits above DIALOG.
+        -- A click raises the toplevel DIALOG options window over a DIALOG popup.
         OnShow = function(dialog) dialog:SetFrameStrata("FULLSCREEN_DIALOG") end,
         timeout = 0,
         whileDead = true,
@@ -226,7 +188,7 @@ local function RegisterReloadPopup()
     }
 end
 
--- AceConfigDialog closes its windows with the Blizzard settings panel, so leave that panel first.
+-- Leave Blizzard's settings first and open a frame later, once its close has run.
 local function OpenFromSettingsNow()
     local panel = _G.SettingsPanel
     if panel and panel:IsShown() then
@@ -281,10 +243,9 @@ function ns.RegisterOptions()
     for _, event in ipairs({ "OnProfileChanged", "OnProfileCopied", "OnProfileReset" }) do
         db.RegisterCallback(ns, event, OnProfileSwap)
     end
-    LibStub("AceConfig-3.0"):RegisterOptionsTable(ns.ID, function()
+    function ns.OptionsRoot()
         return ns.BuildOptionsTable(ns.features, ns.featureOrder, ctx)
-    end)
-    LibStub("AceConfigDialog-3.0"):SetDefaultSize(ns.ID, 760, 560)
+    end
     RegisterReloadPopup()
     RegisterBlizzardEntry()
 end

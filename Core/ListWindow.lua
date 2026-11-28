@@ -332,9 +332,9 @@ local function FillRow(row, entry, textW)
         row.icon:Hide()
     end
     row.text:SetPoint("TOPLEFT", row, "TOPLEFT", indent, -ROW_PAD)
-    row.text:SetWidth(textW - indent - rightW)
+    row.text:SetWidth(math.max(1, textW - indent - rightW))
     row.text:SetJustifyH("LEFT")
-    row.text:SetWordWrap(not (entry.right or entry.extra))
+    row.text:SetWordWrap(true)
     row.text:SetText(entry.text)
     return row.text:GetStringHeight() + ROW_PAD * 2
 end
@@ -357,7 +357,7 @@ local function AlignIcons(...)
     for _, row in ipairs(rows) do
         if row.hasRight then
             row.rightW = PlaceRight(row, extraCol)
-            row.text:SetWidth(row.textW - row.indent - row.rightW)
+            row.text:SetWidth(math.max(1, row.textW - row.indent - row.rightW))
         end
     end
     local widest = 0
@@ -368,7 +368,7 @@ local function AlignIcons(...)
         if row.hasIcon then
             row.icon:ClearAllPoints()
             row.icon:SetPoint("RIGHT", row.right, "LEFT", -(ICON_GAP + widest - row.rightW), 0)
-            row.text:SetWidth(row.textW - row.indent - widest - ICON_SIZE - ICON_GAP)
+            row.text:SetWidth(math.max(1, row.textW - row.indent - widest - ICON_SIZE - ICON_GAP))
         end
     end
 end
@@ -410,7 +410,19 @@ function Window:SetEntries(entries, summary, pinned)
     for i, entry in ipairs(pins) do
         local row = self:PinRow(i)
         pinRows[i] = row
-        local h = FillRow(row, entry, textW)
+        FillRow(row, entry, textW)
+        row:Show()
+    end
+    for i, entry in ipairs(entries) do
+        local row = self:Row(i)
+        listRows[i] = row
+        FillRow(row, entry, textW)
+        row:Show()
+    end
+    AlignIcons(pinRows, listRows)
+    for i, entry in ipairs(pins) do
+        local row = pinRows[i]
+        local h = entry.button and BUTTON_H or row.text:GetStringHeight() + ROW_PAD * 2
         row:SetHeight(h)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", PAD, -scrollTop)
@@ -429,13 +441,12 @@ function Window:SetEntries(entries, summary, pinned)
     end
     local heights, y = {}, 0
     for i, entry in ipairs(entries) do
-        local row = self:Row(i)
+        local row = listRows[i]
         if entry.header and i > 1 then
             heights[#heights + 1] = HEADER_GAP - ROW_GAP
             y = y - HEADER_GAP
         end
-        listRows[i] = row
-        local h = FillRow(row, entry, textW)
+        local h = entry.button and BUTTON_H or row.text:GetStringHeight() + ROW_PAD * 2
         row:SetHeight(h)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", self.content, "TOPLEFT", 0, y)
@@ -444,7 +455,6 @@ function Window:SetEntries(entries, summary, pinned)
         y = y - h - ROW_GAP
     end
     for i = #entries + 1, #self.rows do self.rows[i]:Hide() end
-    AlignIcons(pinRows, listRows)
     local actionsH = self.buttonFrames and (BUTTON_H + ROW_GAP) or 0
     local chrome = scrollTop + actionsH + PAD - ROW_GAP
     local height, needsScroll = ns.ListWindowLayout(heights, chrome, self.fixedH or MaxHeight())

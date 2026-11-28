@@ -13,6 +13,10 @@ eq(a.type, "group"); eq(a.inline, true)
 eq(a.name, "|cff808080Quest Sync|r")
 ok(a.args.requires.name:find("Requires: RXPGuides", 1, true), "section states it")
 eq(a.args.requires.disabled, nil); eq(a.args.requires.order, 0); eq(a.args.enabled.order, 0.5)
+eq(a.args.enabled.width, "normal", "enable toggle shares a row")
+ns.FEATURE_CLIENTS.MinimapButton = "all"
+local minimap = ns.BuildOptionsTable({ MinimapButton = { key = "MinimapButton", title = "Minimap", alwaysOn = true } }, { "MinimapButton" }, ctx)
+eq(minimap.args.helpers, nil, "minimap launcher has no options page")
 ok(a.args.x.order == nil or a.args.x.order >= 1, "feature args after the header lines")
 for k, arg in pairs(a.args) do
     if k ~= "requires" and k ~= "help" then eq(arg.disabled, true, k .. " disabled") end
@@ -84,13 +88,19 @@ ns.FEATURE_CLIENTS.A, ns.FEATURE_CLIENTS.B = "forever", "retail"
 
 eq(ns.RequiresText({ "A", "B" }, function(n) return n == "B" and "|cffff0000Bee|r" or "" end), "Requires: A, Bee")
 
-dofile("Libs/LibStub/LibStub.lua")
-dofile("Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua")
-dofile("Libs/AceConfig-3.0/AceConfigRegistry-3.0/AceConfigRegistry-3.0.lua")
-local registry = _G.LibStub("AceConfigRegistry-3.0")
+assert(loadfile("Core/OptionsModel.lua"))("KlausisLittleHelpers", ns)
 local function valid(tab, name)
-    local good, problem = pcall(registry.ValidateOptionsTable, registry, tab, name)
-    ok(good, tostring(problem))
+    local entries = ns.OptionsModel.Entries(tab)
+    ok(#entries > 0, name .. " has entries")
+    for _, entry in ipairs(entries) do
+        if not entry.heading then
+            local page = ns.OptionsModel.Page(tab, entry.id)
+            ok(page ~= nil, name .. ": " .. entry.id .. " renders")
+            if name == "modules" and entry.level == 2 then
+                ok(#page.controls > 0, entry.id .. " has controls")
+            end
+        end
+    end
 end
 valid(t, "t"); valid(t2, "t2"); valid(t5, "t5")
 
@@ -124,19 +134,123 @@ for _, spec in ipairs(specs) do
 end
 valid(ns.BuildOptionsTable(all, keys, { isForever = true, isLoaded = function() return true end, settings = function() return {} end }), "modules")
 eq(all.WritCratePlanner.commands[1], "writs")
+
+local SUPPORTED = { group = true, toggle = true, select = true, range = true, execute = true, input = true,
+    description = true, header = true }
+local everySpec, everyKey = {}, {}
+local everyStub = setmetatable({
+    RegisterFeature = function(spec) everySpec[spec.key] = spec; everyKey[#everyKey + 1] = spec.key end,
+}, { __index = stub })
+local toc = assert(io.open("KlausisLittleHelpers.toc", "r"))
+for line in toc:lines() do
+    local path = line:match("^(Modules\\%S+%.lua)")
+    if path then
+        local chunk = assert(loadfile((path:gsub("\\", "/"))))
+        local loaded, why = pcall(chunk, "KlausisLittleHelpers", everyStub)
+        ok(loaded, path .. " loads: " .. tostring(why))
+    end
+end
+toc:close()
+local registered = 0
+for key in pairs(ns.FEATURE_CLIENTS) do if everySpec[key] then registered = registered + 1 end end
+ok(#everyKey >= 8, "every module registers its feature")
+eq(#everyKey, registered, "every module feature is listed in FEATURE_CLIENTS")
+local function CheckTypes(node, path)
+    for k, arg in pairs(node.args or {}) do
+        local where = path .. "." .. tostring(k)
+        ok(SUPPORTED[arg.type], where .. " has a supported type: " .. tostring(arg.type))
+        if arg.type == "group" then CheckTypes(arg, where) end
+    end
+end
+for _, forever in ipairs({ true, false }) do
+    CheckTypes(ns.BuildOptionsTable(everySpec, everyKey, { isForever = forever, isLoaded = function() return true end,
+        settings = function() return {} end }), forever and "forever" or "retail")
+end
+local checkSettingsContract
+local coverage = {
+    -- Related tests are partial; individual setting behavior and profile changes remain unverified unless tested there.
+    FarmTracker = { fishIdleMinutes = "farmtracker_test.lua: setter and fishing idle behavior" },
+    TurnInRoute = { useHearth = "routewiring_test.lua: route wiring and Shortest Path disabled state", useTeleports = "routewiring_test.lua: route wiring and Shortest Path disabled state", useShortestPath = "routewiring_test.lua: option, profile and planner wiring", waypoints = "routewiring_test.lua: route wiring and Shortest Path disabled state" },
+    TustUIXPBar = { showSessionXP = "xpbar_test.lua: display behavior", rateSource = "xpbar_test.lua: rate behavior" },
+    SoulstoneReminder = { instances = "soulstonewiring_test.lua: reminder wiring", banner = "soulstonewiring_test.lua: reminder wiring", announce = "soulstonewiring_test.lua: reminder wiring", whisper = "soulstonewiring_test.lua: reminder wiring", sound = "soulstonewiring_test.lua: reminder wiring" },
+    WritCratePlanner = {
+        countBank = "writdepthwiring_test.lua: bank option wiring", useFavorForReceipts = "candidates_test.lua: planner math",
+        liveMinQty = "writdepthwiring_test.lua: depth wiring", priceMethod = "pricecheck_test.lua: price calculation",
+        historyDays = "pricecheck_test.lua: price calculation", halfLife = "market_test.lua: weighted market prices",
+        minDays = "pricecheck_test.lua: price calculation", cheapBelow = "pricecheck_test.lua: price calculation",
+        highAbove = "pricecheck_test.lua: price calculation", dontBuyAbove = "pricecheck_test.lua: price calculation",
+        marketShare = "market_test.lua: market calculation",
+    },
+}
+local settingTypes = { toggle = true, range = true, select = true, input = true }
+local currentSettings
+everyStub.GetSettings = function() return currentSettings end
+checkSettingsContract = function(featureSpecs, inventory, report)
+for feature in pairs(inventory) do
+    report(featureSpecs[feature] ~= nil and type(featureSpecs[feature].options) == "function", feature .. " inventory feature is current")
+end
+for _, spec in pairs(featureSpecs) do
+    if spec.options then
+        currentSettings = spec.defaults or {}
+        local args = spec.options(currentSettings)
+        local seenOptions = {}
+        local ok = report
+        local function checkOptions(options, prefix, defaults)
+            for key, arg in pairs(options) do
+                local path = prefix .. key
+                if arg.type == "group" then
+                    checkOptions(arg.args or {}, path .. ".", type(defaults) == "table" and defaults[key] or nil)
+                elseif settingTypes[arg.type] then
+                    seenOptions[path] = true
+                    local entry = inventory[spec.key] and inventory[spec.key][path]
+                    ok(entry ~= nil, spec.key .. "." .. path .. " needs a behavior/profile coverage inventory entry")
+                    if entry then
+                        local file = entry:match("^([^:]+): .+")
+                        local handle = file and io.open(".tools/tests/" .. file, "r")
+                        ok(handle ~= nil, spec.key .. "." .. path .. " references an existing test")
+                        if handle then handle:close() end
+                    end
+                    ok(type(arg.get) == "function" and type(arg.set) == "function", spec.key .. "." .. path .. " has callbacks")
+                    local default
+                    if type(defaults) == "table" then default = defaults[key] end
+                    ok(default ~= nil, spec.key .. "." .. path .. " has a default")
+                    if arg.type == "toggle" then ok(type(default) == "boolean", spec.key .. "." .. path .. " has a boolean default") end
+                    if arg.type == "range" then
+                        ok(type(default) == "number" and type(arg.min) == "number" and type(arg.max) == "number" and arg.min <= default and default <= arg.max, spec.key .. "." .. path .. " has a valid range and default")
+                        ok(type(arg.step) == "number" and arg.step > 0, spec.key .. "." .. path .. " has a positive step")
+                    end
+                    if arg.type == "select" and type(arg.values) == "table" then
+                        ok(arg.values[default] ~= nil, spec.key .. "." .. path .. " default is a choice")
+                    end
+                    if type(arg.get) == "function" then ok(arg.get() == default, spec.key .. "." .. path .. " getter reads default") end
+                elseif arg.type == "execute" then
+                    ok(type(arg.func) == "function", spec.key .. "." .. path .. " has an action")
+                end
+            end
+        end
+        checkOptions(args, "", currentSettings)
+        for key in pairs(inventory[spec.key] or {}) do ok(seenOptions[key], spec.key .. "." .. key .. " inventory entry is current") end
+    end
+end
+
+end
+checkSettingsContract(everySpec, coverage, ok)
+local fixtureErrors = {}
+checkSettingsContract({ Nested = { key = "Nested", defaults = { group = { value = true } }, options = function() return { group = { type = "group", args = { value = { type = "toggle", get = function() return true end, set = function() end } } } } end } }, { Nested = { ["group.value"] = "options_test.lua: fixture" }, Gone = { old = "options_test.lua: fixture" } }, function(success, message) if not success then fixtureErrors[#fixtureErrors + 1] = message end end)
+ok(#fixtureErrors == 1 and fixtureErrors[1]:find("Gone", 1, true), "nested defaults and stale features are checked")
+
+
 _G.LibStub = nil
 
 local callbacks, popups, notified = {}, 0, 0
-local fakeDB = { global = {}, profile = { features = {} }, RegisterCallback = function(_, event, fn) callbacks[event] = fn end }
+local fakeDB = { char = {}, global = {}, profile = { features = {} }, RegisterCallback = function(_, event, fn) callbacks[event] = fn end }
 local libs = {
     ["AceDB-3.0"] = { New = function() return fakeDB end },
     ["AceDBOptions-3.0"] = { GetOptionsTable = function() return {} end },
-    ["AceConfig-3.0"] = { RegisterOptionsTable = function() end },
-    ["AceConfigDialog-3.0"] = { SetDefaultSize = function() end },
-    ["AceConfigRegistry-3.0"] = { NotifyChange = function() notified = notified + 1 end },
 }
 _G.LibStub = function(name) return libs[name] end
 _G.StaticPopup_Show = function() popups = popups + 1 end
+ns.NotifyOptionsChanged = function() notified = notified + 1 end
 ns.FEATURE_CLIENTS.Sw, ns.FEATURE_CLIENTS.On = "all", "all"
 ns.RegisterFeature({ key = "Sw", title = "Switchable", enable = function() end })
 local redraws = 0
@@ -144,6 +258,8 @@ ns.RegisterFeature({ key = "On", title = "Always", alwaysOn = true, enable = fun
 local realLoaded = ns.WasEnabledAtLoad
 ns.WasEnabledAtLoad = function(key) return key == "On" end
 ns.RegisterOptions()
+ok(type(ns.OptionsRoot) == "function", "RegisterOptions exposes the options root builder")
+ok(ns.OptionsRoot().args.general, "the root is the built options table")
 for _, event in ipairs({ "OnProfileChanged", "OnProfileCopied", "OnProfileReset" }) do
     ok(callbacks[event], event .. " registered")
 end
@@ -239,37 +355,4 @@ ok(box.F1_enabled.order < box.F1_b.order, "Enable toggle before options")
 ok(box.F1_b.order < box.F1_a.order, "options keep their order")
 ok(box.F1_a.order < box.F2_header.order, "next feature starts after the last option")
 ok(box.F2_c ~= nil, "second feature flattened too")
-dofile("Libs/LibStub/LibStub.lua")
-dofile("Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua")
-dofile("Libs/AceConfig-3.0/AceConfigRegistry-3.0/AceConfigRegistry-3.0.lua")
-local reg = _G.LibStub("AceConfigRegistry-3.0")
-local vgood, vproblem = pcall(reg.ValidateOptionsTable, reg, ts, "ts")
-ok(vgood, tostring(vproblem))
-_G.LibStub = nil
-
-local function FakeFrame()
-    local f = { hooks = {}, textures = {} }
-    f.CreateTexture = function()
-        local tex = { shown = true }
-        tex.SetColorTexture = function(tx, _, _, _, alpha) tx.alpha = alpha end
-        tex.SetPoint = function() end
-        tex.Show = function(tx) tx.shown = true end
-        tex.Hide = function(tx) tx.shown = false end
-        f.textures[#f.textures + 1] = tex
-        return tex
-    end
-    f.HookScript = function(frame, name, hook) frame.hooks[name] = hook end
-    return f
-end
-local pooled = FakeFrame()
-local dialog = { OpenFrames = {} }
-function dialog:Open(id) self.OpenFrames[id] = { frame = pooled } end
-_G.LibStub = function(name) if name == "AceConfigDialog-3.0" then return dialog end end
-ns.OpenOptions()
-eq(#pooled.textures, 1, "adds one background")
-ok(pooled.textures[1].shown and pooled.textures[1].alpha > 0.9, "opaque while open")
-pooled.hooks.OnHide(pooled)
-eq(pooled.textures[1].shown, false, "hidden when the window closes, for other addons reusing the frame")
-ns.OpenOptions()
-eq(#pooled.textures, 1, "reopening reuses it"); eq(pooled.textures[1].shown, true)
-_G.LibStub = nil
+valid(ts, "ts")
