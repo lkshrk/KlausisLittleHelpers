@@ -39,7 +39,7 @@ graph LR
 | `scripts/release.sh` | Tags and pushes a release. |
 | `scripts/taxi-data.py`, `scripts/writ-data.py` | Data generators (see [Data and Generators](<Data and Generators.md>)). |
 | `.tools/check-toc.lua`, `.tools/errors.lua` | Lua helpers for `check.sh` and `errors.sh`. |
-| `.tools/tests/run.lua` and 42 `*_test.lua` files | Test runner and tests. |
+| `.tools/tests/run.lua` and 49 `*_test.lua` files | Test runner and tests. |
 | `.luarc.json` | LuaLS settings: Lua 5.1, the addon and test globals, and `~/.local/share/wow/vscode-wow-api/Annotations` as library. |
 | `lefthook.yml` | Git hooks. |
 | `.github/workflows/check.yml`, `release.yml` | CI and release. |
@@ -47,9 +47,15 @@ graph LR
 
 ## Public Interface
 
+### `scripts/libs.sh`
+
+`scripts/externals.sh` parses `.pkgmeta` externals, including comments, CRLF and blank lines, and rejects checkout-type `commit`. `externals_test.lua` covers this parser.
+
+Run `scripts/libs.sh` after a fresh clone to fetch the pinned `.pkgmeta` externals. It requires Subversion and Git. Existing folders are left alone; run `scripts/libs.sh --force` after changing a pin to replace them. CI fetches libraries before running checks.
+
 ### `scripts/check.sh`
 
-Steps, all run even after a failure:
+After checking that the library folders exist, these steps all run even after a failure:
 
 1. `luac5.1 -p` (or `luac`, override with `LUAC`) on every Lua file from `git ls-files --cached --others --exclude-standard`, excluding `Libs/`.
 2. `lua5.1 .tools/check-toc.lua KlausisLittleHelpers.toc`: every TOC path exists, and every tracked `.lua` file outside `scripts/`, `tests/`, `Libs/`, `.tools/` is listed.
@@ -59,7 +65,7 @@ Steps, all run even after a failure:
 
 ### `scripts/test.sh`
 
-`.tools/tests/run.lua` loads each test file into its own environment. The environment inherits `_G` and adds `eq(a, b, msg)`, `ok(cond, msg)`, `find(list, field, value, pred)`, `has(...)`, a fresh `ns = { Data = {} }`, and `addon(path)`, which runs a repository file with `("KlausisLittleHelpers", ns)` as its varargs. Failures print `FAIL ...` to stderr; every failing assertion in a file is reported, then the runner exits with 1. Success prints `PASS <files> files, <assertions> assertions`.
+There are 50 `.tools/tests/*_test.lua` files. `.tools/tests/run.lua` loads each test file into its own environment. The environment inherits `_G` and adds `eq(a, b, msg)`, `ok(cond, msg)`, `find(list, field, value, pred)`, `has(...)`, a fresh `ns = { Data = {} }`, and `addon(path)`, which runs a repository file with `("KlausisLittleHelpers", ns)` as its varargs. Failures print `FAIL ...` to stderr; every failing assertion in a file is reported, then the runner exits with 1. Success prints `PASS <files> files, <assertions> assertions`.
 
 ### `scripts/sync.sh retail|forever|all [--dry-run]`
 
@@ -113,15 +119,15 @@ Run `lefthook install` once per clone. Do not skip hooks with `--no-verify` (pro
 
 ## Implementation Notes
 
-- **Lint config**: `.luacheckrc` excludes `Libs/**` and `.release/**`, sets `max_line_length = false`, `unused_args = false`. Read-only WoW globals are listed, and the addon's own globals are `KLH`, `KLH_DB`, `KLH_CharDB`, `SlashCmdList`, `SLASH_KLH1..3`. Test files may use `eq`, `ok`, `find`, `has`, `addon` and the global `ns`.
+- **Lint config**: `.luacheckrc` excludes `Libs/**` and `.release/**`, sets `max_line_length = false`, `unused_args = false`. Read-only WoW globals are listed, and the addon's own globals are `KLH`, `KLH_Store`, `SlashCmdList` (legacy globals are retained for tests), `SLASH_KLH1..3`. Test files may use `eq`, `ok`, `find`, `has`, `addon` and the global `ns`.
 - **Why tests stub globals**: tests that touch game APIs save the globals they replace and restore them at the end, because each test file runs in an environment that falls back to `_G`.
-- **Test inventory** (42 files), by area: Core (`core`, `slash`, `options`, `settingsentry`, `ui`, `listwindow`, `livefeature`), routes (`routegraph`, `routeheap`, `routeopts`, `routeplanner`, `routewiring`, `routeevents`, `routequestie`, `routedraw`, `turnin`, `teleports`), writs (`cover`, `plan`, `tiebreak`, `candidates`, `observe`, `planner`, `plannerevents`, `writlearner`, `optimal`, `writdepth`, `writdepthqueue`, `writdepthwiring`, `writuse`, `writhistory`, `pricecheck`), RestedXP Quest Sync (`questsync`, `questsynccap`), Soulstone Reminder (`soulstone`, `soulstonewiring`, `soulstonecomms`), Layer Change Prompt (`layerprompt`), TustUI XP bar (`xpbar`), data (`data`, `retaildata`), structure (`standalone`).
+- **Test inventory** (46 files), by area: farm tracker (`farmlogic`, `farmtracker`), Core (`minimapbutton`, `core`, `slash`, `options`, `settingsentry`, `ui`, `listwindow`, `livefeature`), routes (`routegraph`, `routeheap`, `routeopts`, `routeplanner`, `routewiring`, `routeevents`, `routequestie`, `routedraw`, `turnin`, `teleports`), writs (`cover`, `plan`, `tiebreak`, `candidates`, `observe`, `planner`, `plannerevents`, `writlearner`, `optimal`, `writdepth`, `writdepthqueue`, `writdepthwiring`, `writuse`, `writhistory`, `pricecheck`, `market`), RestedXP Quest Sync (`questsync`, `questsynccap`), Soulstone Reminder (`soulstone`, `soulstonewiring`, `soulstonecomms`), Layer Change Prompt (`layerprompt`), TustUI XP bar (`xpbar`), data (`data`, `retaildata`), structure (`standalone`).
 - `standalone_test.lua` reads the TOC and fails if any Core, Modules or Data file mentions `EllesmereUI`, `EUI.` or `EUI_CLIENT_BLOCKED`, except `Modules/TustUIXPBar.lua`.
 - `renovate.json5` configures dependency updates.
 
 ## Dependencies
 
-- Required locally: `bash`, `lua5.1`, `luac5.1`, `git`, `rsync` (sync).
+- Required locally: `bash`, `lua5.1`, `luac5.1`, `git`, `svn` (libraries), `rsync` (sync).
 - Optional: `luacheck`, `lefthook`, `gitleaks`, `shellcheck`, `yq`, `actionlint`, `python3` (generators), `gh` (release workflow runs it in CI).
 - CI: GitHub Actions, BigWigs packager.
 
@@ -133,3 +139,10 @@ The tests themselves are described per component in the other deep-dive files. C
 
 - Frame code (map markers, ListWindow rows) is only covered through pure helpers such as `ns.ListWindowLayout`; a fake `CreateFrame` could cover the rest.
 - `sync.sh` and `errors.sh` default to a fixed `WOW_DIR` path on one machine. Both print an error when the folder or SavedVariables are missing, but the path itself is not discoverable.
+
+The options model, widgets and settings window have dedicated offline tests, alongside the feature options tree tests.
+
+
+## Storage schema checks
+
+`scripts/check.sh` runs the offline suite, including `schema_test.lua`, `storage_test.lua` and `storage_contract_test.lua`. The contract migrates synthetic fixtures from every declared version through the current target and checks registered steps and fixture verifiers. Add consecutive migration steps and a synthetic fixture with a meaningful verifier for each new version; retain older steps and fixtures. Never use real SavedVariables as fixtures. These checks do not prove fixture completeness, migration semantics or in-game persistence; add behavior tests and verify relevant changes in game.

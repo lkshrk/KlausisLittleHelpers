@@ -35,7 +35,7 @@ end
 _G.GetBuildInfo = function() return "1.60.1", "71037", "", 16001 end
 _G.C_AddOns = { IsAddOnLoaded = function() return false end }
 _G.geterrorhandler = function() return function(e) error(e, 0) end end
-local fakeDB = { profile = { features = {} } }
+local fakeDB = { char = {}, profile = { features = {} } }
 _G.LibStub = function(name) if name == "AceDB-3.0" then return { New = function() return fakeDB end } end end
 _G.ShardTransferImminentFrame = nil
 

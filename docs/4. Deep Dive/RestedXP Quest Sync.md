@@ -37,7 +37,7 @@ stateDiagram-v2
 ## Implementation Notes
 
 - **Registration**: the spec in the file has no `alwaysOn = true`. `ns.IsEnabled` therefore reads `settings.enabled`, and `Options.lua` adds an Enable toggle for this feature (order 0.5) that asks for a reload. It has no `disable`, so it is the only feature that still asks for a reload; it is off until the player turns it on and reloads.
-- **Enable**: `enable` returns at once if `LibStub("AceEvent-3.0", true)` is missing. AceEvent-3.0 is vendored in `Libs/`. It imports `QuestieTracker` from `QuestieLoader` (used for `IsTrackedByQuestie`), embeds AceEvent into a private `listener` table, registers `RXP_GUIDE_LOADED` and `RXP_STEP_ACTIVATED` messages, registers `QUEST_ACCEPTED` on a frame, and hooks `RXPFrame` `OnShow` if it exists.
+- **Enable**: `enable` returns at once if `LibStub("AceEvent-3.0", true)` is missing. AceEvent-3.0 is fetched into `Libs/` from `.pkgmeta`. It imports `QuestieTracker` from `QuestieLoader` (used for `IsTrackedByQuestie`), embeds AceEvent into a private `listener` table, registers `RXP_GUIDE_LOADED` and `RXP_STEP_ACTIVATED` messages, registers `QUEST_ACCEPTED` on a frame, and hooks `RXPFrame` `OnShow` if it exists.
 - **Guide parsing**: `GuideQuests(g)` walks `g.steps[*].elements`, keeps elements with tags `accept`, `turnin`, `complete`, `collect`, `daily`, `dailyturnin`, `questgoto` or `questwaypoint` that have a numeric positive `questId`.
 - **New guide**: `OnMessage` accepts the guide table from the second or first argument, ignores the same table, stores it and sets `fullSyncPending`. A guide with steps but no recognised quest tags clears the stored quests and prints once "this guide section has no quests".
 - **Notices**: `WarnOnce` prints once each when Questie's tracker lacks `IsTrackedByQuestie` (the default tracker state is used) and when no guide window appears after the 30 tries.
@@ -53,7 +53,7 @@ stateDiagram-v2
 
 ## Testing
 
-`questsync_test.lua` saves and restores the globals it stubs (`C_Timer`, `C_QuestLog`, `RXPV2GuideWindow`, `RXPFrame`, `wipe`) and uses the vendored AceEvent. It enables the captured spec, sends a guide while the window is hidden and checks that nothing is synced, then shows the window and checks the guide quest is tracked and another quest is untracked (removals before adds). It also covers accepted quests, a guide without quests, the give-up notice and the Questie tracker notice. `questsynccap_test.lua` checks the 25-quest watch limit (3 in the test) and the next-step ordering.
+`questsync_test.lua` saves and restores the globals it stubs (`C_Timer`, `C_QuestLog`, `RXPV2GuideWindow`, `RXPFrame`, `wipe`) and uses the fetched AceEvent. It enables the captured spec, sends a guide while the window is hidden and checks that nothing is synced, then shows the window and checks the guide quest is tracked and another quest is untracked (removals before adds). It also covers accepted quests, a guide without quests, the give-up notice and the Questie tracker notice. `questsynccap_test.lua` checks the 25-quest watch limit (3 in the test) and the next-step ordering.
 
 ## Potential Improvements
 

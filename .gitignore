@@ -1,3 +1,4 @@
+/Libs/*/
 .release/
 *.zip
 .luacheckcache

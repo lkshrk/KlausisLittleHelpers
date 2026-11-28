@@ -4,12 +4,15 @@ Lua 5.1 only, ASCII only in code, comments, strings and docs. Almost no comments
 
 ## Setup
 
-Needs `bash`, `lua5.1`, `luac5.1`, `git`, `rsync`. Optional: `luacheck`, `lefthook`, `gitleaks`, `shellcheck`, `yq`, `actionlint`, `python3`.
+Needs `bash`, `lua5.1`, `luac5.1`, `git`, `svn`, `rsync`. Optional: `luacheck`, `lefthook`, `gitleaks`, `shellcheck`, `yq`, `actionlint`, `python3`.
 
 ```sh
+scripts/libs.sh           # fetch pinned libraries after cloning
 lefthook install          # once per clone
 scripts/ui-source.sh update   # Blizzard UI source and the WoW API annotations for the editor
 ```
+
+After changing a pin in `.pkgmeta`, run `scripts/libs.sh --force` to refresh the libraries.
 
 `.luarc.json` points the Lua language server (LuaLS) at `~/.local/share/wow/vscode-wow-api/Annotations`, so WoW globals resolve in the editor.
 
@@ -21,6 +24,8 @@ Pre-commit checks staged files (gitleaks, luac, luacheck, tests, TOC, shellcheck
 scripts/check.sh   # luac, TOC coverage, tests, luacheck, ASCII check
 scripts/test.sh    # only the tests in .tools/tests
 ```
+
+Settings options must be listed in the coverage inventory in `.tools/tests/options_test.lua`. Add feature-specific tests for changed values, effects and profile changes or resets; name the relevant tests and disclose any remaining gaps in the inventory. CI checks that the referenced test files exist, not that they cover the stated behavior or profile changes. The shared structural checks do not prove behavior, and must not call destructive actions.
 
 Run `scripts/check.sh` before committing. CI runs it too, plus shellcheck, actionlint and gitleaks.
 
@@ -46,3 +51,10 @@ scripts/release.sh patch|minor|major   # tags X.Y.Z (no v prefix) and pushes bra
 The release workflow packages the tag with the BigWigs packager once CI passes on that commit. The TOC keeps `## Version: @project-version@`; the packager fills it from the tag, and `scripts/sync.sh` writes the `git describe` version (or `dev-<sha>` before the first tag, `-dirty` with uncommitted changes) into the copied TOC.
 
 The CurseForge project description is a short permanent text that links to the README; CurseForge has no API to update it, so it is not kept in sync. Per-release changes reach CurseForge through the changelog the packager uploads with each file. Wago reads the README on its own.
+
+
+## Storage changes
+
+`KLH_Store` is the sole SavedVariable: `schemaVersion` and the AceDB `database` share an envelope. Version 0 starts fresh without importing `KLH_DB` or `KLH_CharDB`. Settings use AceDB profiles, shared data uses `db.global`, and per-character data uses `db.char`. Profile operations remain native AceDB operations.
+
+Migrate the whole raw envelope at startup before AceDB initialization, using consecutive steps registered in `ns.StorageSchema`. For each version add a synthetic fixture and meaningful verifier to `.tools/tests/storage_contract_test.lua`; retain old fixtures and steps and never use real SavedVariables. `scripts/check.sh` runs the contract, but cannot prove fixture completeness, migration semantics or in-game persistence. Add behavior tests and verify relevant changes in game.

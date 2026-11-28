@@ -24,6 +24,14 @@ case "$target" in
     *) usage ;;
 esac
 
+entries=$(bash scripts/externals.sh .pkgmeta)
+while IFS=$'\t' read -r library _; do
+    if [[ ! -d "$library" ]]; then
+        echo "Libraries missing; run scripts/libs.sh first." >&2
+        exit 1
+    fi
+done <<<"$entries"
+
 excludes=(--exclude='.*' --exclude='*.zip')
 while IFS= read -r path; do
     excludes+=(--exclude="/${path%/}")

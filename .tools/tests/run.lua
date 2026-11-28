@@ -34,6 +34,9 @@ local function NewEnv()
     env.addon = function(path)
         local chunk, err = loadfile(path)
         if not chunk then fail("load " .. path, err) return end
+        if path == "Core/Core.lua" then
+            assert(loadfile("Core/Schema.lua"))("KlausisLittleHelpers", env.ns)
+        end
         chunk("KlausisLittleHelpers", env.ns)
     end
     return env

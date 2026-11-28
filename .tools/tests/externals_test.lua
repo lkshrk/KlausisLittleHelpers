@@ -1,0 +1,16 @@
+local function parse(text)
+    local path = os.tmpname()
+    local file = assert(io.open(path, "wb"))
+    file:write(text)
+    file:close()
+    local pipe = assert(io.popen("bash scripts/externals.sh '" .. path .. "' 2>/dev/null; printf '\\nexit:%s' $?"))
+    local output = pipe:read("*a")
+    pipe:close()
+    os.remove(path)
+    return output
+end
+local output = parse("externals:\r\n  Lib/A: https://example.org/a # inline\r\n\r\n  Lib/B:\r\n    url: https://example.org/b # block\r\n    tag: v1 # version\r\n    type: git\r\n")
+eq(output, "Lib/A\thttps://example.org/a\t\t\nLib/B\thttps://example.org/b\tv1\tgit\n\nexit:0")
+ok(parse("externals:\n  Lib/A:\n    tag: v1\n"):find("exit:1", 1, true))
+ok(parse("other: value\n"):find("exit:1", 1, true))
+ok(parse("externals:\n  Lib/A:\n    url: https://example.org/a\n    checkout-type: commit\n"):find("exit:1", 1, true))

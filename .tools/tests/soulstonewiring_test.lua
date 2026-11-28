@@ -125,7 +125,7 @@ _G.SendChatMessage = nil
 _G.PlaySound = function() sounds = sounds + 1 end
 _G.SOUNDKIT = { RAID_WARNING = 8959 }
 _G.C_CombatLog = nil
-local fakeDB = { profile = { features = {} } }
+local fakeDB = { char = {}, profile = { features = {} } }
 _G.LibStub = function(name) if name == "AceDB-3.0" then return { New = function() return fakeDB end } end end
 
 local good, problem = pcall(function()

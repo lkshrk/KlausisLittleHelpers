@@ -3,6 +3,7 @@
   "runtime.version": "Lua 5.1",
   "diagnostics.globals": [
     "KLH",
+    "KLH_Store",
     "KLH_DB",
     "KLH_CharDB",
     "SlashCmdList",

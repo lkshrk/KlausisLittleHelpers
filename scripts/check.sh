@@ -5,6 +5,13 @@ cd "$(dirname "$0")/.."
 
 LUAC="${LUAC:-$(command -v luac5.1 || command -v luac)}"
 failed=0
+entries=$(bash scripts/externals.sh .pkgmeta)
+while IFS=$'\t' read -r library _; do
+    if [[ ! -d "$library" ]]; then
+        echo "Libraries missing; run scripts/libs.sh first." >&2
+        exit 1
+    fi
+done <<<"$entries"
 
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- '*.lua' ':!:Libs/**')
 for f in "${files[@]}"; do
