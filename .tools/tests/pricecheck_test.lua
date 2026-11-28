@@ -1,3 +1,4 @@
+addon("Core/UI.lua")
 ns.RegisterFeature = function() end
 addon("Modules/WritCrateSearch.lua"); addon("Modules/WritCrateState.lua")
 addon("Modules/WritCrateHistory.lua"); addon("Modules/WritCratePlanner.lua")
@@ -20,7 +21,7 @@ local at = P.CheapestAt(r, { [1] = 50, [2] = 50 }, settings)
 eq(at.cost, 100); eq(at.gain, 100)
 
 local pc = P.PriceCheck(r, settings, hist)
-eq(pc.days, 2); eq(pc.usualUnit, 1, "100 copper per 100 rep at typical prices"); eq(pc.method, "typical")
+eq(pc.daily[1].day, 10, "typical method retains daily observations"); eq(pc.days, 2); eq(pc.usualUnit, 1, "100 copper per 100 rep at typical prices"); eq(pc.method, "typical")
 eq(pc.byLevel[level].tier, "dontbuy", "today 2/rep vs usual 1/rep")
 ok(math.abs(pc.byLevel[level].pct - 1) < 1e-9)
 eq(pc.byLevel[level].unit, 2)
@@ -39,17 +40,19 @@ unrelated[1][10] = 60
 eq(P.PriceCheck(r, settings, unrelated).days, 2, "reported days are the plan's days")
 input.prices[9] = nil
 
-local rj = P.RejudgeAtScan({ method = "typical", days = 2, usualUnit = 1, byLevel = { [0] = { tier = "cheap", pct = -0.5, unit = 0.5 } } },
+local scanTrend = { pctPerDay = 2, count = 5, span = 7 }
+local rj = P.RejudgeAtScan({ method = "typical", days = 2, usualUnit = 1, trend = scanTrend, byLevel = { [0] = { tier = "cheap", pct = -0.5, unit = 0.5 } } },
     r, { [1] = 110, [2] = 100 }, settings)
 eq(rj.byLevel[level].unit, 2.1, "repriced at the given scan prices")
 eq(rj.byLevel[level].tier, "dontbuy"); eq(rj.byLevel[level].pct, 1.1)
 eq(rj.usualUnit, 1, "the usual unit is kept"); eq(rj.days, 2); eq(rj.method, "typical")
+eq(rj.trend, scanTrend, "live scan retains historical trend")
 eq(P.RejudgeAtScan({ reason = "few", days = 1 }, r, {}, settings).reason, "few", "reason states pass through")
 eq(P.RejudgeAtScan(nil, r, {}, settings), nil)
 
 settings.priceMethod = "days"
 local byDay = P.PriceCheck(r, settings, { [1] = { [10] = 50, [11] = 150 }, [2] = { [10] = 50, [11] = 50 } })
-eq(byDay.usualUnit, 1.5, "median of the per-day units 1.0 and 2.0"); eq(byDay.method, "days")
+eq(byDay.usualUnit, 2, "recent daily unit has greater weight"); eq(byDay.method, "days"); eq(byDay.daily[1].day, 10); eq(byDay.daily[1].costByItem[1], 50)
 
 for _, method in ipairs({ "typical", "days" }) do
     settings.priceMethod = method
@@ -131,6 +134,12 @@ local found = {}
 for _, l in ipairs(tip) do found[l.left] = l end
 eq(found["  Per rep"].right, P.FormatMoney(2), "tooltip shows today's cost per unit")
 eq(found["  Usual"].right, P.FormatMoney(r.priceCheck.usualUnit), "and the usual one")
+eq(found["  Trend estimate"].right, "Insufficient reliable history", "planner tooltip without trend")
+r.priceCheck.trend = scanTrend
+ok(has(P.PlanLines(r, r.options[1], "Cheapest"), nil, nil, function(l)
+    return l.left == "  Trend estimate" and l.right == "+2.0%/day (5 days, 7-day span)"
+end), "planner tooltip with trend")
+r.priceCheck.trend = nil
 
 r.selected, r.plan = 1, r.options[1].plan
 ok(not (P.Summary(r) or { text = "" }).text:find("Price", 1, true), "the summary carries no price line; the row chevron and tooltip do")

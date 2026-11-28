@@ -1,3 +1,4 @@
+addon("Core/UI.lua")
 ns.RegisterFeature = function() end
 addon("Modules/WritCratePlanner.lua")
 local P = ns.WritPlanner
@@ -327,9 +328,22 @@ do
     eq(out.lines[3].cost, 20 * 2, "owned crate: fill only")
     eq(out.lines[4].cost, 2 * 7, "receipts: the empty crates bought")
     eq(out.cost, 160 + 141 + 40 + 14, "total is the sum of its lines")
+    eq(out.costByItem[1], 100, "writ purchase attribution")
+    eq(out.costByItem[2], 60, "owned materials retain their full charge")
+    eq(out.costByItem[10], 35, "crate and receipt purchases share attribution")
+    eq(out.costByItem[11], 160, "crate fill attribution")
     eq(out.ownValue, 30, "value of the owned item used")
     eq(out.fromBank, nil, "nothing from the bank without bank counts")
     eq(shared.cost, 1, "lines are copied, shared lines untouched")
+
+    local missingReceipt = P.RepriceLines({ lines = { shared } }, {}, { owned = {} }, {})
+    eq(missingReceipt.lines[1].cost, 1, "receipt retains its cost without a crate price")
+    eq(missingReceipt.costByItem, nil, "receipt fallback cannot be attributed")
+    local unknownOwned = P.RepriceLines({ lines = { { kind = "writ", ref = rw } } }, { [1] = 100 }, { owned = { [2] = 10 } }, rb)
+    eq(unknownOwned.cost, 100, "unknown owned material preserves displayed cost")
+    eq(unknownOwned.costByItem, nil, "unknown owned material cannot be attributed")
+    local missingUncosted = P.RepriceLines({ lines = { { kind = "writ", ref = rw } } }, {}, { owned = {} }, rb)
+    eq(missingUncosted.costByItem, nil, "unpriced line without old cost cannot be attributed")
 
     local fav = { mode = "favor", target = 200, input = { owned = {}, onQuest = {} }, rb = {}, cands = { unpriced = {} } }
     local fplan2 = { lines = {}, cost = 5, gain = 200, zones = 0, short = 0 }
@@ -389,7 +403,19 @@ do
     eq(out.lines[1].cost, 130, "the writ that uses the owned item still pays its value")
     eq(out.lines[2].cost, 130, "the owned item is not counted twice")
     eq(out.lines[3].cost, 3 * 7 + 60 * 2, "owned bundle items count at full value")
+    eq(out.costByItem[2], 60, "shared material pool charges both uses")
+    eq(out.costByItem[11], 120, "shared owned materials are charged once per use")
     eq(out.ownValue, 30 + 25 * 2, "owned value is the owned items used, at their price")
+
+    local fallback = P.RepriceLines(rp, { [1] = 100, [2] = 30, [3] = 100, [10] = 7 },
+        { owned = { [2] = 1 }, onQuest = {} }, rb)
+    eq(fallback.lines[3].cost, 0, "missing fill price preserves original cost")
+    eq(fallback.costByItem, nil, "fallback cost has no attributable provenance")
+    local repriced = P.RepriceLines(fallback, prices, { owned = {}, onQuest = {} }, rb)
+    eq(repriced.costByItem[11], 120, "attribution returns after prices become available")
+    local fallbackAgain = P.RepriceLines(repriced, { [1] = 100, [2] = 30, [3] = 100, [10] = 7 },
+        { owned = {}, onQuest = {} }, rb)
+    eq(fallbackAgain.costByItem, nil, "stale attribution is not retained after fallback")
 
     local banked = P.RepriceLines(rp, prices, { owned = { [2] = 1, [11] = 25 }, bags = { [2] = 1, [11] = 5 }, onQuest = {} }, rb)
     eq(banked.fromBank[11], 20, "bags are used first, the rest comes from the bank")

@@ -94,11 +94,14 @@ local function Crates(order, gain, gap, known)
 end
 obs = Crates("bags", 20, 0)
 eq(#obs, 1, "bag update then currency"); eq(obs[1].kind, "crate"); eq(obs[1].key, "artisan:gathered"); eq(obs[1].favor, 20)
-obs = Crates("currency", 25, 0.2)
-eq(#obs, 1, "currency then bag update"); eq(obs[1].favor, 25)
+obs = Crates("currency", 20, 0.2)
+eq(#obs, 1, "currency then bag update"); eq(obs[1].favor, 20)
 eq(#Crates("currency", 25, 5.5), 0, "departure after the window is not matched")
 eq(#Crates("bags", 25, 5.5), 0, "gain after the window is not matched")
 eq(#Crates("bags", 23, 0), 0, "gain off the 5 step ignored")
+obs = Crates("bags", 20, 0, 5)
+eq(#obs, 1, "stale textiles observation does not block learning")
+if obs[1] then Record(obs); eq(store.sealedFavor["artisan:gathered"], 20, "fresh observation replaces stale value") end
 eq(Crates("bags", 40, 0, 20)[1].favor, 20, "known favor doubled is halved")
 eq(#Crates("bags", 25, 0, 20), 0, "known favor: other gains ignored")
 

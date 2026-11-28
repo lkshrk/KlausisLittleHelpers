@@ -29,7 +29,9 @@ FAVOR = {
     "gathered": dict(zip(TIER_ORDER, (5, 10, 15, 20))),
     "crafted": dict(zip(TIER_ORDER, (10, 20, 30, 40))),
 }
-UNCONFIRMED_TIERS = {"artisan"}
+UNCONFIRMED_TIERS = set()
+# User-reported in-game reward, not verified from DB2.
+CRATE_REWARDS = {248698: 5}
 PREFIX = "Waylaid Crate: "
 WRIT_PREFIX = "Craftsman's Writ: "
 SEALED_TIERS = ["apprentice", "journeyman", "expert", "artisan", "elite"]
@@ -301,7 +303,9 @@ def build_crates(cache, tips):
         )
         out.append(lua_row([
             ("itemID", item_id), ("name", lua_val(name)), ("tier", lua_val(tier)), ("kind", lua_val(kind)),
-            ("favor", FAVOR[kind][tier]), ("confirmed", lua_val(tier not in UNCONFIRMED_TIERS)),
+            ("favor", CRATE_REWARDS.get(item_id, FAVOR[kind][tier])),
+            ("confirmed", lua_val(item_id in CRATE_REWARDS or tier not in UNCONFIRMED_TIERS or (tier == "artisan" and kind == "crafted"))),
+            ("rewardOverride", lua_val(True) if item_id in CRATE_REWARDS else None),
             ("bundles", "{ " + bundles + " }"),
         ]))
     return out

@@ -15,6 +15,11 @@ function W.SealedKey(tier, kind)
     return tier .. ":" .. kind
 end
 
+local function CategoryFavor(key, favor)
+    if key == "artisan:gathered" and favor == 5 then return nil end
+    return favor
+end
+
 local function ObservedRep(observed, tier)
     local t = observed and observed.writRep and observed.writRep[tier]
     local rep = t and t.rep
@@ -68,7 +73,8 @@ function W.BuildCandidates(input)
             end
         end
         local have, buyCost = owned[row.itemID] or 0, prices[row.itemID]
-        local known = seen[W.SealedKey(row.tier, row.kind)]
+        local key = W.SealedKey(row.tier, row.kind)
+        local known = not row.rewardOverride and CategoryFavor(key, seen[key]) or nil
         if not best then
             out.unpriced[#out.unpriced + 1] = row.name
         elseif have > 0 or buyCost then
@@ -145,7 +151,9 @@ function W.SealedRow(data, itemID)
     local sealed = data.SealedCrates and data.SealedCrates[itemID]
     if not (sealed and sealed.kind) then return nil end
     for _, row in ipairs(data.WaylaidCrates) do
-        if row.tier == sealed.tier and row.kind == sealed.kind then return row, W.SealedKey(sealed.tier, sealed.kind) end
+        if row.tier == sealed.tier and row.kind == sealed.kind and not row.rewardOverride then
+            return row, W.SealedKey(sealed.tier, sealed.kind)
+        end
     end
     return nil
 end
@@ -364,7 +372,7 @@ function Learner:ResolveGain(now, out)
     self.pendingGain, self.departed = nil, {}
     if not row then return out end
     local seen = self.observed().sealedFavor
-    local favor = W.CrateFavor(row, g.gain, seen and seen[key])
+    local favor = W.CrateFavor(row, g.gain, CategoryFavor(key, seen and seen[key]))
     if favor then out[#out + 1] = { kind = "crate", key = key, favor = favor } end
     return out
 end

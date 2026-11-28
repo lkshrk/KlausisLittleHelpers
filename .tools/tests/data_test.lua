@@ -12,13 +12,16 @@ local c = find(ns.Data.WaylaidCrates, "itemID", 248709)
 eq(c.name, "Expert Ingots"); eq(c.kind, "crafted"); eq(c.favor, 30); eq(c.confirmed, true)
 eq(c.bundles[1].itemID, 3860); eq(c.bundles[1].count, 20)
 local a = find(ns.Data.WaylaidCrates, "itemID", 248699)
-eq(a.favor, 20); eq(a.confirmed, false)
+eq(a.favor, 20); eq(a.confirmed, true)
 eq(find(ns.Data.Writs, "itemID", 10592).item, "Catseye Draught", "Forever item name")
 eq(find(ns.Data.Writs, "itemID", 18645).item, "Gnomish Alarm-O-Bot")
 for _, row in ipairs(ns.Data.WaylaidCrates) do
-    if row.tier == "artisan" then eq(row.confirmed, false, "artisan unconfirmed: " .. row.name) end
+    if row.tier == "artisan" then
+        eq(row.favor, row.itemID == 248698 and 5 or row.kind == "crafted" and 40 or 20, "artisan favor: " .. row.name)
+        eq(row.confirmed, true, "artisan confirmation: " .. row.name)
+    end
 end
-eq(find(ns.Data.WaylaidCrates, "itemID", 248711).confirmed, false)
+eq(find(ns.Data.WaylaidCrates, "itemID", 248711).confirmed, true)
 local S = ns.Data.SealedCrates
 eq(S[248765].tier, "apprentice"); eq(S[248765].kind, "gathered"); eq(S[248769].tier, "elite")
 eq(S[248772].tier, "expert"); eq(S[248772].kind, "crafted"); eq(S[248779].tier, "elite"); eq(S[248775].kind, nil)

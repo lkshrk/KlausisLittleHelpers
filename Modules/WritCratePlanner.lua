@@ -38,9 +38,7 @@ function P.CleanAmount(text)
 end
 
 function P.FormatNumber(n)
-    local s = tostring(math.floor(n + 0.5))
-    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-    return (out:gsub("^,", ""))
+    return ns.UI.FormatNumber(n)
 end
 
 function P.ResetText(seconds)
@@ -79,14 +77,7 @@ function P.CrateName(ref)
 end
 
 function P.FormatMoney(copper)
-    copper = math.floor((copper or 0) + 0.5)
-    if copper >= 10000 then
-        local silver = math.floor((copper + 50) / 100)
-        return ("%sg %02ds"):format(P.FormatNumber(math.floor(silver / 100)), silver % 100)
-    end
-    local s, c = math.floor(copper / 100), copper % 100
-    if s > 0 then return ("%ds %02dc"):format(s, c) end
-    return ("%dc"):format(c)
+    return ns.UI.FormatMoney(copper)
 end
 
 local function Terms(plan, bundleOf, onQuest)
@@ -165,6 +156,7 @@ end
 
 local state = { mode = "rep", view = { open = {} } }
 local window, last, ahButton
+local completed, completedView, completedPick, completedTarget
 local statusText, targetBox, modeButtons, standingArrow, searchButton
 local SEARCH_W = 64
 
@@ -347,14 +339,28 @@ local function Unit(plan)
     return plan.gain > 0 and plan.cost / plan.gain or nil
 end
 
-local function MedianUnit(r, dayPrices, settings, baseShort)
+local function HalfLife(settings)
+    local n = settings.halfLife
+    if type(n) ~= "number" or n ~= n or n < 1 or n > 21 then return 4 end
+    return n
+end
+local function MedianUnit(r, dayPrices, settings, baseShort, today)
     local units = {}
     for _, day in ipairs(dayPrices) do
         local plan = P.CheapestAt(r, day.prices, settings)
         local unit = plan and plan.short <= baseShort and Unit(plan)
-        if unit then units[#units + 1] = unit end
+        if unit then
+            ---@cast plan -nil
+            local reliable = plan.costByItem ~= nil
+            for id in pairs(plan.costByItem or {}) do
+                local provenance = day.provenance[id]
+                if not provenance or provenance.kind ~= "observed" then reliable = false end
+            end
+            units[#units + 1] = { day = day.day, value = unit, gain = plan.gain, costByItem = plan.costByItem,
+                provenance = day.provenance, reliable = reliable }
+        end
     end
-    return ns.WritHistory.Median(units)
+    return ns.WritHistory.WeightedMedian(units, today, HalfLife(settings)), units
 end
 
 local function PlanItemIDs(r, plan)
@@ -381,16 +387,17 @@ function P.PriceCheck(r, settings, history)
     history = history or H.ReadHistory(ids)
     if not next(history) then return { reason = "none" } end
     local today = H.Today()
-    local typical, anyDays = H.TypicalPrices(history, today, settings.historyDays, prices)
+    local typical, anyDays = H.TypicalPrices(history, today, settings.historyDays, prices, HalfLife(settings))
     if anyDays == 0 then return { reason = "none" } end
     local first = r.options[1]
     local days = H.DaysCovered(history, PlanItemIDs(first.from or r, first.plan), today, settings.historyDays)
     if days < math.min(settings.minDays, settings.historyDays) then return { reason = "few", days = days } end
 
     local baseShort = r.options[1].plan.short or 0
+    local dayUnit, daily = MedianUnit(r, H.DayPrices(history, today, settings.historyDays, prices), settings, baseShort, today)
     local usualUnit
     if settings.priceMethod == "days" then
-        usualUnit = MedianUnit(r, H.DayPrices(history, today, settings.historyDays, prices), settings, baseShort)
+        usualUnit = dayUnit
         if not usualUnit then return { reason = "short" } end
     else
         local usual = P.CheapestAt(r, typical, settings)
@@ -401,7 +408,133 @@ function P.PriceCheck(r, settings, history)
     end
 
     local byLevel = JudgeLevels(r.options, usualUnit, settings, function(o) return Unit(o.plan) end)
-    return { method = settings.priceMethod == "days" and "days" or "typical", days = days, usualUnit = usualUnit, byLevel = byLevel }
+    return { method = settings.priceMethod == "days" and "days" or "typical", days = days, usualUnit = usualUnit, byLevel = byLevel, daily = daily, trend = ns.WritHistory.Trend(daily or {}, today) }
+end
+
+-- The market index ignores the player (owned items, done writs, bank) so it reads the same for everyone on this AH.
+function P.NeutralInput(input)
+    local out = {}
+    for k, v in pairs(input) do out[k] = v end
+    out.owned, out.bags, out.doneToday, out.onQuest, out.level = {}, {}, {}, {}, nil
+    return out
+end
+
+local function MarketSources(input)
+    local cands = ns.WritState.BuildCandidates(input)
+    local writs, crates = {}, {}
+    for _, c in ipairs(cands.writs) do
+        if (c.rep or 0) > 0 then
+            writs[#writs + 1] = { unit = c.cost / c.rep, ids = { c.ref.writID, c.ref.itemID }, name = P.WritName(c.ref),
+                components = { { itemID = c.ref.writID, cost = input.prices[c.ref.writID] },
+                    { itemID = c.ref.itemID, cost = input.prices[c.ref.itemID] * (c.ref.qty or 1) } }, gain = c.rep }
+        end
+    end
+    for _, c in ipairs(cands.crates) do
+        if c.buyCost and (c.favor or 0) > 0 then
+            crates[#crates + 1] = { unit = (c.buyCost + c.fillCost) / c.favor, ids = { c.ref.itemID, c.fillBundle.itemID },
+                name = P.CrateName(c.ref), components = { { itemID = c.ref.itemID, cost = c.buyCost },
+                    { itemID = c.fillBundle.itemID, cost = c.fillCost } }, gain = c.favor }
+        end
+    end
+    return writs, crates
+end
+
+--- Mean cost per unit of the cheapest share percent of sources, and the item IDs behind them.
+function P.TopMean(sources, share)
+    if #sources == 0 then return nil end
+    table.sort(sources, function(a, b) return a.unit < b.unit end)
+    local n = math.max(1, math.ceil(#sources * share / 100))
+    local sum, ids, picked = 0, {}, {}
+    for i = 1, n do
+        sum = sum + sources[i].unit
+        picked[i] = sources[i]
+        for _, id in ipairs(sources[i].ids) do ids[#ids + 1] = id end
+    end
+    return sum / n, ids, picked, #sources
+end
+
+local function IndexAt(input, prices, which, share, cache)
+    local copy = {}
+    for k, v in pairs(input) do copy[k] = v end
+    copy.prices = prices
+    if not cache[prices] then
+        local writs, crates = MarketSources(copy)
+        cache[prices] = { rep = writs, favor = crates }
+    end
+    return P.TopMean(cache[prices][which], share)
+end
+
+--- One market index per kind ("rep": writs by cost per rep, "favor": crates by cost per Favor), today against usual.
+function P.MarketIndex(input, settings, history, today)
+    local H = ns.WritHistory
+    local neutral = P.NeutralInput(input)
+    local share = settings.marketShare or 25
+    local ids = {}
+    for id in pairs(neutral.prices) do ids[#ids + 1] = id end
+    history = history or H.ReadHistory(ids)
+    today = today or H.Today()
+    local dayPrices = next(history) and H.DayPrices(history, today, settings.historyDays, neutral.prices) or {}
+    local out, cache = {}, {}
+    local typical
+    for _, which in ipairs({ "rep", "favor" }) do
+        local unit, picked, best, total = IndexAt(neutral, neutral.prices, which, share, cache)
+        local result
+        if not unit then
+            result = { reason = "empty" }
+        elseif not next(history) then
+            result = { reason = "none" }
+        else
+            local days = H.DaysCovered(history, picked, today, settings.historyDays)
+            if days == 0 then
+                result = { reason = "none" }
+            elseif days < math.min(settings.minDays, settings.historyDays) then
+                result = { reason = "few", days = days }
+            else
+                local daily, low, high = {}, nil, nil
+                for _, d in ipairs(dayPrices) do
+                    local u, _, sources = IndexAt(neutral, d.prices, which, share, cache)
+                    if u then
+                        ---@cast sources -nil
+                        local components, complete, sum = {}, #sources > 0, 0
+                        for sourceIndex, source in ipairs(sources) do
+                            if not source.components or not source.gain or source.gain <= 0 then complete = false end
+                            for _, component in ipairs(source.components or {}) do
+                                if type(component.cost) ~= "number" or not d.provenance[component.itemID] then
+                                    complete = false
+                                else
+                                sum = sum + component.cost / source.gain / #sources
+                                components[#components + 1] = { itemID = component.itemID, cost = component.cost,
+                                    gain = source.gain, source = sourceIndex, selectedCount = #sources,
+                                    contribution = component.cost / source.gain / #sources,
+                                    provenance = d.provenance[component.itemID],
+                                    reliable = d.provenance[component.itemID] ~= nil
+                                        and d.provenance[component.itemID].kind == "observed" }
+                                end
+                            end
+                        end
+                        if math.abs(sum - u) > 1e-9 * math.max(1, math.abs(u)) then complete = false end
+                        daily[#daily + 1] = { day = d.day, value = u, components = complete and components or nil }
+                        if not low or u < low then low = u end
+                        if not high or u > high then high = u end
+                    end
+                end
+                local usual
+                if settings.priceMethod == "days" then
+                    usual = H.WeightedMedian(daily, today, HalfLife(settings))
+                else
+                    typical = typical or H.TypicalPrices(history, today, settings.historyDays, neutral.prices, HalfLife(settings))
+                    usual = IndexAt(neutral, typical, which, share, cache)
+                end
+                local v = usual and H.Verdict(unit, usual, settings)
+                result = v and { unit = unit, usualUnit = usual, tier = v.tier, pct = v.pct, days = days, low = low, high = high, daily = daily, trend = H.Trend(daily, today) }
+                    or { reason = "empty" }
+            end
+        end
+        result.share, result.count, result.total, result.best = share, best and #best or 0, total or 0, best
+        result.window = settings.historyDays
+        out[which] = result
+    end
+    return out
 end
 
 local function RepOptions(r, settings)
@@ -718,7 +851,11 @@ function P.Summary(r)
         return { text = table.concat(lines, "\n") }
     end
     if r.idle then
-        if r.target and r.target > 0 then
+        if r.offline then
+            add("Search at the auction house to see a plan.")
+        elseif r.settingsChanged then
+            add("Planner settings changed. Press Search to update the plan.")
+        elseif r.target and r.target > 0 then
             add(("Press Search to plan +%s %s."):format(P.FormatNumber(r.target), unit))
         else
             add(r.mode == "favor" and "Type a target amount." or "Type a target amount, or pick a standing.")
@@ -802,6 +939,11 @@ function P.OptionLabel(r, i)
     return ("-%d zone%s, +%s"):format(fewer, fewer == 1 and "" or "s", P.ShortMoney(o.plan.cost - first.plan.cost))
 end
 
+local function TrendText(trend)
+    if not trend then return "Insufficient reliable history" end
+    return ("%+.1f%%/day (%d days, %d-day span)"):format(trend.pctPerDay, trend.count, trend.span)
+end
+
 function P.PlanLines(r, o, title)
     local unit = r.mode == "favor" and "Favor" or "rep"
     local plan = o.plan
@@ -822,6 +964,7 @@ function P.PlanLines(r, o, title)
         if v then
             stat("  Per " .. unit, P.FormatMoney(v.unit))
             stat("  Usual", P.FormatMoney(pc.usualUnit))
+            stat("  Trend estimate", TrendText(pc.trend))
         end
     end
     if plan.zones and r.mode ~= "favor" then stat("Zones", tostring(plan.zones)) end
@@ -970,23 +1113,36 @@ local CALC_TIP = "Still adding up AH listings."
 local PICK_TIP = "Pick an option first: click one of the results."
 local NO_NOTES = { text = "Nothing to note yet.", lines = { { left = "Planner info", gold = true }, { left = "Nothing to note yet.", grey = true } } }
 
+local depth = { ahOpen = false }
+
 local function Scanning()
-    return ns.WritDepth.AuctionatorScanning()
+    return depth.ahOpen and ns.WritDepth.AuctionatorScanning()
 end
 
 local Render, Search
 
 local shown, shownScanning
 
+local function Stale(r)
+    local stamp = r and r.stamp
+    if not stamp then return false end
+    local standing = ns.WritState.Standing()
+    local cur = standing.total
+    if r.mode == "favor" then cur = standing.favor end
+    local now = type(_G.GetServerTime) == "function" and _G.GetServerTime() or nil
+    return (stamp.cur ~= nil and cur ~= nil and stamp.cur ~= cur)
+        or (stamp.resetAt ~= nil and now ~= nil and now >= stamp.resetAt)
+end
+
 local function UpdateButtons(r)
     local scanning = Scanning()
     shownScanning = scanning
     window:SetActionState(1, true)
-    window:SetActionState(2, r.selected ~= nil and not r.progress, r.progress and CALC_TIP or PICK_TIP)
+    window:SetActionState(2, r.selected ~= nil and not r.progress and not Stale(r), r.progress and CALC_TIP or PICK_TIP)
     local busy = r.progress ~= nil or r.waiting == true
     searchButton.label:SetText(busy and "Cancel" or "Search")
-    searchButton:SetActive(busy or not scanning)
-    searchButton.tip = (not busy and scanning) and SCAN_TIP or nil
+    searchButton:SetActive(busy or (depth.ahOpen and not scanning))
+    searchButton.tip = (not depth.ahOpen and "Search at the auction house.") or ((not busy and scanning) and SCAN_TIP or nil)
 end
 
 local function Show(r)
@@ -1003,7 +1159,14 @@ local function Show(r)
     end
     UpdateButtons(r)
     window:SetInfo(P.Footer(r) or NO_NOTES)
-    window:SetEntries(entries, P.Summary(r), pinned)
+    local summary = P.Summary(r)
+    if r == completed and r.calculatedAt then
+        local text = "Calculated: " .. _G.date("%Y-%m-%d %H:%M", r.calculatedAt)
+        if r.pricesStale then text = text .. "\nPrices may have changed - search again to refresh." end
+        if Stale(r) then text = text .. "\nProgress or daily reset changed - search again before shopping." end
+        summary = { text = (summary and summary.text and summary.text .. "\n" or "") .. text }
+    end
+    window:SetEntries(entries, summary, pinned)
 end
 
 function P.LastResult()
@@ -1022,12 +1185,14 @@ local function PickOption(i)
         state.view = { open = {} }
         if last then
             SelectOption(last)
+            if last == completed then completedView, completedPick = state.view, state.pick end
             Show(last)
         end
         return
     end
     if type(i) == "table" and i.group then
         state.view.open[i.group] = not state.view.open[i.group] or nil
+        if last == completed then completedView, completedPick = state.view, state.pick end
         if last then Show(last) end
         return
     end
@@ -1036,12 +1201,12 @@ local function PickOption(i)
     state.view = { open = {} }
     state.pick = o.level
     SelectOption(last)
+    if last == completed then completedView, completedPick = state.view, state.pick end
     Show(last)
 end
 
 local MAX_ROUNDS = 3
 local LIVE_MIN_QTY = 10
-local depth = { ahOpen = false }
 
 local function StopDepth()
     depth.run = nil
@@ -1111,14 +1276,19 @@ function P.RepriceLines(plan, prices, input, bundleOf)
         end
         return banked
     end
+    local attributable = true
     local function mat(id, n)
         local missing, used, banked = take(id, n)
         local price = prices[id]
+        if not price and n > 0 then attributable = false end
         if price then ownValue = ownValue + price * used end
         local cost = price and price * n or (missing == 0 and 0 or nil)
         return cost, banked
     end
-    local total, lines = 0, {}
+    local total, lines, costByItem = 0, {}, {}
+    local function charge(id, amount)
+        if amount and amount ~= 0 then costByItem[id] = (costByItem[id] or 0) + amount end
+    end
     for i, src in ipairs(plan.lines) do
         local line = {}
         for k, v in pairs(src) do line[k] = v end
@@ -1133,14 +1303,22 @@ function P.RepriceLines(plan, prices, input, bundleOf)
             end
             local itemPart, itemBank = mat(ref.itemID, (ref.qty or 1) * count)
             local writPart = writs == 0 and 0 or (prices[ref.writID] and prices[ref.writID] * writs)
-            if writPart and itemPart then cost = writPart + itemPart end
+            if writPart and itemPart then
+                cost = writPart + itemPart
+                charge(ref.writID, writPart)
+                charge(ref.itemID, itemPart)
+            end
             if writBank + itemBank > 0 then line.fromBank = writBank + itemBank end
         elseif line.kind == "crate" then
             local bundle, count = bundleOf[ref], line.count or 1
             local fill, banked
             if bundle then fill, banked = mat(bundle.itemID, bundle.count * count) end
             local buy = line.owned and 0 or (prices[ref.itemID] and prices[ref.itemID] * count)
-            if fill and buy then cost = fill + buy end
+            if fill and buy then
+                cost = fill + buy
+                charge(bundle.itemID, fill)
+                charge(ref.itemID, buy)
+            end
             banked = banked or 0
             if line.owned then
                 local _, _, crateBank = take(ref.itemID, count)
@@ -1152,8 +1330,9 @@ function P.RepriceLines(plan, prices, input, bundleOf)
             local bought = line.bought or 0
             local price = bought > 0 and line.crateRef and prices[line.crateRef.itemID]
             if bought == 0 then cost = 0 elseif price then cost = bought * price end
+            if price then charge(line.crateRef.itemID, cost) end
         end
-        if cost then line.cost = cost end
+        if cost then line.cost = cost else attributable = false end
         total = total + (line.cost or 0)
         lines[i] = line
     end
@@ -1167,6 +1346,7 @@ function P.RepriceLines(plan, prices, input, bundleOf)
     local out = {}
     for k, v in pairs(plan) do out[k] = v end
     out.lines, out.cost, out.ownValue = lines, total, ownValue
+    out.costByItem = attributable and costByItem or nil
     out.fromBank = next(fromBank) and fromBank or nil
     out.bankNames = next(bankNames) and bankNames or nil
     return out
@@ -1181,6 +1361,16 @@ function P.RejudgeAtScan(pc, r, scan, settings)
         return Unit(P.RepriceLines(o.plan, scan, from.input, from.bundleOf))
     end)
     return out
+end
+
+local function FinishResult(r, calculatedAt)
+    r.calculatedAt = calculatedAt
+    ns.CharData(KEY).plan = r.savedPlan
+    r.savedPlan = nil
+    last, completed = r, r
+    completedTarget = targetBox and targetBox:GetText() or tostring(r.target or "")
+    completedView, completedPick = state.view, state.pick
+    Show(r)
 end
 
 local function FinishDepth(run)
@@ -1207,8 +1397,8 @@ local function FinishDepth(run)
     if #options > 0 or buys then SetOptions(r, options, buys) end
     r.priceCheck = P.RejudgeAtScan(run.base.priceCheck, r, run.scan, Settings())
     r.progress = nil
-    last = r
-    Show(r)
+    r.savedPlan = run.base.savedPlan
+    FinishResult(r, _G.GetServerTime and _G.GetServerTime())
 end
 
 local Fetch
@@ -1287,10 +1477,10 @@ local function Now()
     return type(f) == "function" and f() or nil
 end
 
-local function ShowIdle()
+local function ShowIdle(settingsChanged)
     StopDepth()
     last = nil
-    Show({ idle = true, mode = state.mode, standing = ns.WritState.Standing(), cands = { unpriced = {} }, input = {},
+    Show({ idle = true, offline = not depth.ahOpen, settingsChanged = settingsChanged, mode = state.mode, standing = ns.WritState.Standing(), cands = { unpriced = {} }, input = {},
         target = P.ParseAmount(targetBox and targetBox:GetText()), reset = P.ResetText(DailyReset()) })
 end
 
@@ -1306,19 +1496,11 @@ local function RefreshInputs()
     targetBox:SetText(saved.target)
 end
 
-local function Stale(r)
-    local stamp = r and r.stamp
-    if not stamp then return false end
-    if Progress(r.mode) ~= stamp.cur then return true end
-    local now = Now()
-    return now ~= nil and stamp.resetAt ~= nil and now >= stamp.resetAt
-end
-
 Render = function()
     if not window then return end
     local text = targetBox and targetBox:GetText() or ""
     local target, cur = P.ParseAmount(text), Progress(state.mode)
-    ns.CharData(KEY).plan = { mode = state.mode, target = text,
+    local savedPlan = { mode = state.mode, target = text,
         goal = target and type(cur) == "number" and cur + target or nil }
     local refreshing = false
     if depth.ahOpen and not Scanning() and ns.WritDepth.ScanOutdated() then
@@ -1335,9 +1517,11 @@ Render = function()
     r.priceCheck = P.PriceCheck(r, Settings())
     local secs, now = DailyReset(), Now()
     r.stamp = { cur = cur, resetAt = secs and now and now + secs or nil }
+    r.savedPlan = savedPlan
     last = r
     Show(r)
     StartDepth(r)
+    if not depth.run then FinishResult(r, now) end
 end
 
 function P.MissingNames(terms)
@@ -1352,8 +1536,13 @@ function P.MissingNames(terms)
 end
 
 local NAME_WAIT = 2
-local nameWait, nameFrame
+local nameWait, nameFrame, nameResult, nameView
 local function OpenListSource() end
+
+local function CancelNames()
+    nameWait, nameResult, nameView = nil, nil, nil
+    if nameFrame then nameFrame:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
+end
 
 function P.OpenShoppingList(name)
     local ah, tab = _G.AuctionHouseFrame, _G.AuctionatorTabs_Shopping
@@ -1373,14 +1562,14 @@ end
 local CreateList
 
 local function FinishNames()
-    nameWait = nil
-    if nameFrame then nameFrame:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
-    CreateList(true)
+    local result, view = nameResult, nameView
+    CancelNames()
+    if last == result and (last.view or last) == view then CreateList(true) end
 end
 
-local function WaitForNames(missing)
+local function WaitForNames(missing, result, view)
     for itemID in pairs(missing) do _G.C_Item.RequestLoadItemDataByID(itemID) end
-    nameWait = missing
+    nameWait, nameResult, nameView = missing, result, view
     if not nameFrame then
         nameFrame = CreateFrame("Frame")
         nameFrame:SetScript("OnEvent", function(_, _, itemID)
@@ -1398,6 +1587,11 @@ local function WaitForNames(missing)
 end
 
 CreateList = function(retried)
+    if Stale(last) then
+        ns.Print("Progress or daily reset changed - search again before shopping.")
+        if last then Show(last) end
+        return
+    end
     local auc = Api()
     local r = last and (last.view or last)
     if not (auc and r and r.plan and #r.plan.lines > 0) then
@@ -1413,7 +1607,7 @@ CreateList = function(retried)
         if nameWait then return end
         local missing = P.MissingNames(shopping)
         if next(missing) then
-            WaitForNames(missing)
+            WaitForNames(missing, last, r)
             return
         end
     end
@@ -1429,11 +1623,15 @@ CreateList = function(retried)
 end
 
 local function SetMode(mode)
+    if not depth.ahOpen and completed then return end
+    CancelNames()
     if P.SwitchMode(state, mode) and targetBox then targetBox:SetText("") end
     ShowIdle()
 end
 
 local function Reset()
+    if not depth.ahOpen and completed then return end
+    CancelNames()
     state.pick = nil
     StopDepth()
     if targetBox then targetBox:SetText("") end
@@ -1527,28 +1725,36 @@ local function BuildTop(f, width, y)
 end
 
 Search = function()
+    if not depth.ahOpen then return end
+    CancelNames()
+    if last == completed then completedView, completedPick = state.view, state.pick end
     state.pick = nil
     state.view = { open = {} }
     if depth.queue then depth.queue:Clear() end
     Render()
 end
 
+local function RestoreCompleted()
+    last = completed
+    if not completed then return end
+    state.mode = completed.mode
+    if completedView then state.view, state.pick = completedView, completedPick end
+    if targetBox then targetBox:SetText(completedTarget or tostring(completed.target or "")) end
+end
+
 function P.Cancel()
-    if not last then return end
-    if last.waiting then
-        ShowIdle()
-        return
-    end
+    CancelNames()
     StopDepth()
-    last.progress = nil
-    Show(last)
+    RestoreCompleted()
+    if last then Show(last) else ShowIdle() end
 end
 
 function P.StopAll()
     StopDepth()
-    if last and (last.progress or last.waiting) then last = nil end
-    nameWait = nil
-    if nameFrame then nameFrame:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end
+    if last and (last.progress or last.waiting) then
+        RestoreCompleted()
+    end
+    CancelNames()
 end
 
 local function SyncAHButton()
@@ -1567,6 +1773,7 @@ local function EnsureWindow()
         },
     })
     window:Build()
+    if type(_G.UISpecialFrames) == "table" then table.insert(_G.UISpecialFrames, "KLHWritCratePlannerWindow") end
     local target = P.RestoreState(state, ns.CharData(KEY).plan)
     if targetBox then targetBox:SetText(target) end
     local since = 0
@@ -1574,7 +1781,7 @@ local function EnsureWindow()
         since = since + (elapsed or 0)
         if since < 0.5 then return end
         since = 0
-        P.SyncScanState()
+        if not P.SyncScanState() and shown == completed and Stale(shown) then Show(shown) end
     end)
     window.frame:HookScript("OnHide", function() P.StopAll() end)
     window.frame:HookScript("OnShow", SyncAHButton)
@@ -1591,7 +1798,6 @@ local function Open(besideAH)
         return
     end
     EnsureWindow()
-    depth.openedAtAH = besideAH == true
     local host = besideAH and AuctionHost()
     if host and host:IsShown() then
         window.frame:ClearAllPoints()
@@ -1600,10 +1806,17 @@ local function Open(besideAH)
         local valid = type(h) == "number" and type(hs) == "number" and type(ws) == "number" and ws > 0
         window:SetFixedHeight(valid and h * hs / ws or nil)
     else
+        window.frame:ClearAllPoints()
+        local p = ns.GetSettings(KEY).windowPoint
+        if type(p) == "table" and p[1] then
+            window.frame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        else
+            window.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        end
         window:SetFixedHeight(nil)
     end
-    RefreshInputs()
-    if last and Stale(last) then last = nil end
+    if not depth.ahOpen and not last and completed then RestoreCompleted() end
+    if depth.ahOpen or last ~= completed then RefreshInputs() end
     if last and not last.progress then Show(last) else ShowIdle() end
 end
 
@@ -1613,6 +1826,110 @@ local function ToggleWindow()
     else
         Open(false)
     end
+end
+
+local market
+
+local MARKET_LABEL = { rep = "Writs", favor = "Crates" }
+
+--- One market's change for the button, "+27%" in its tier colour, and its tier; nil without a verdict.
+function P.MarketPart(m)
+    if not (m and m.tier) then return nil end
+    return ColorCode(ns.WritHistory.TIER_COLOR[m.tier]) .. ("%+d%%"):format(math.floor(m.pct * 100 + 0.5)) .. "|r", m.tier
+end
+
+function P.MarketLines(mi)
+    local lines = { { left = "Writ & Crate Planner", gold = true } }
+    for _, which in ipairs({ "rep", "favor" }) do
+        local m = mi and mi[which]
+        if m then
+            local label = ("%s, cheapest %d%%"):format(MARKET_LABEL[which], m.share or 25)
+            local value
+            if m.tier then
+                value = ColorCode(ns.WritHistory.TIER_COLOR[m.tier]) .. ("%+d%%"):format(math.floor(m.pct * 100 + 0.5)) .. "|r"
+                    .. P.YoungNote(m)
+            else
+                value = PriceReason(m) or "No price"
+            end
+            if #lines > 1 then lines[#lines + 1] = { left = " " } end
+            lines[#lines + 1] = { left = label, right = value }
+            if m.tier then
+                local unit = which == "rep" and "rep" or "Favor"
+                lines[#lines + 1] = { left = "  Verdict", right = ns.WritHistory.TIER_LABEL[m.tier], label = true }
+                lines[#lines + 1] = { left = "  Per " .. unit, right = P.FormatMoney(m.unit), label = true }
+                lines[#lines + 1] = { left = "  Usual", right = P.FormatMoney(m.usualUnit), label = true }
+                lines[#lines + 1] = { left = "  Trend estimate", right = TrendText(m.trend), label = true }
+                if m.low and m.high then
+                    lines[#lines + 1] = { left = ("  Last %d days"):format(m.window or 14),
+                        right = P.FormatMoney(m.low) .. " - " .. P.FormatMoney(m.high), label = true }
+                end
+            end
+            if (m.total or 0) > 0 then
+                lines[#lines + 1] = { left = "  Counted", right = ("%d of %d %s"):format(m.count, m.total,
+                    which == "rep" and "writs" or "crates"), label = true }
+            end
+            if m.best and #m.best > 0 then
+                lines[#lines + 1] = { left = "  Cheapest now", label = true, right = " " }
+                for i = 1, math.min(3, #m.best) do
+                    lines[#lines + 1] = { left = "    " .. m.best[i].name, right = P.FormatMoney(m.best[i].unit) }
+                end
+            end
+        end
+    end
+    lines[#lines + 1] = { left = " " }
+    lines[#lines + 1] = { left = "Today's cheapest writs and crates against their usual price from your Auctionator history, "
+        .. "for everyone on this auction house (your own items and done writs do not count). Updated after each scan. Click to plan.",
+        grey = true }
+    return lines
+end
+
+local function PaintPart(part, m)
+    local text, tier = P.MarketPart(m)
+    part.text:SetText(text or "")
+    local file = tier and ns.WritHistory.TIER_ICON[tier]
+    if file then
+        local c = ns.WritHistory.TIER_COLOR[tier]
+        part.icon:SetTexture(file)
+        part.icon:SetVertexColor(c[1], c[2], c[3])
+        part.icon:Show()
+    else
+        part.icon:Hide()
+    end
+    return text ~= nil
+end
+
+local function PaintMarket()
+    if not (ahButton and ahButton.market) then return end
+    local parts = ahButton.market
+    local rep = PaintPart(parts.rep, market and market.rep)
+    local favor = PaintPart(parts.favor, market and market.favor)
+    parts.sep:SetShown(rep and favor)
+end
+
+local function RefreshMarket()
+    if not depth.ahOpen or Scanning() then return end
+    local ok, result = pcall(function()
+        local settings = Settings()
+        return P.MarketIndex(ns.WritState.Snapshot(settings), settings)
+    end)
+    market = ok and result or nil
+    if not ok then _G.geterrorhandler()(result) end
+    PaintMarket()
+end
+
+function P.MarketResult()
+    return market
+end
+
+local scanWatch = { scanning = false, elapsed = 0 }
+
+local function WatchScan(_, elapsed)
+    scanWatch.elapsed = scanWatch.elapsed + (elapsed or 0)
+    if scanWatch.elapsed < 0.5 then return end
+    scanWatch.elapsed = 0
+    local now = Scanning()
+    if scanWatch.scanning and not now then RefreshMarket() end
+    scanWatch.scanning = now
 end
 
 local function ShowAHButton(retried)
@@ -1626,14 +1943,35 @@ local function ShowAHButton(retried)
         return
     end
     if not ahButton then
-        ahButton = ns.CreateWindowButton(host, 110, "Writ Planner", function() Open(true) end)
+        ahButton = ns.CreateWindowButton(host, 210, "Writ Planner", function() Open(true) end)
         ahButton:SetPoint("TOPLEFT", host, "TOPRIGHT", 4, 0)
+        ahButton.label:ClearAllPoints()
+        ahButton.label:SetPoint("LEFT", ahButton, "LEFT", 8, 0)
+        local function Part(rightOf, gap)
+            local part = { text = UI.Font(ahButton, 12, 1, 1, 1), icon = ahButton:CreateTexture(nil, "OVERLAY") }
+            part.text:SetPoint("RIGHT", rightOf, rightOf == ahButton and "RIGHT" or "LEFT", -gap, 0)
+            part.icon:SetSize(12, 12)
+            part.icon:SetPoint("RIGHT", part.text, "LEFT", -3, 0)
+            part.icon:Hide()
+            return part
+        end
+        local favor = Part(ahButton, 8)
+        local sep = UI.Solid(ahButton, "ARTWORK", 1, 1, 1, 0.3)
+        sep:SetSize(1, 14)
+        sep:SetPoint("RIGHT", favor.icon, "LEFT", -7, 0)
+        sep:Hide()
+        ahButton.market = { favor = favor, sep = sep, rep = Part(sep, 7) }
         ahButton:HookScript("OnEnter", function(self)
-            UI.ShowTooltip(self, "Writ & Crate Planner: the cheapest writs and crates for a rep or Favor target.")
+            if market then
+                UI.ShowLinesTooltip(self, P.MarketLines(market), true)
+            else
+                UI.ShowTooltip(self, "Writ & Crate Planner: the cheapest writs and crates for a rep or Favor target.")
+            end
         end)
         ahButton:HookScript("OnLeave", function() UI.HideTooltip() end)
     end
     SyncAHButton()
+    PaintMarket()
 end
 
 local EVENTS = {
@@ -1647,12 +1985,37 @@ local QUEUE_EVENTS = {
     AUCTION_HOUSE_THROTTLED_SYSTEM_READY = true, ITEM_KEY_ITEM_INFO_RECEIVED = true,
 }
 
+local settingsStale = false
+
+local function SettingsChanged()
+    settingsStale = settingsStale or last ~= nil
+    StopDepth()
+    shown, market = nil, nil
+    RestoreCompleted()
+    if completed then completed.pricesStale = true end
+    CancelNames()
+    local function Refresh()
+        if last then Show(last) elseif settingsStale then ShowIdle(true) end
+        settingsStale = false
+        if depth.ahOpen then
+            PaintMarket()
+            if not Scanning() then RefreshMarket() end
+        end
+    end
+    if InCombatLockdown() then
+        UI.Defer("KLH_WritPlannerSettings", Refresh)
+    else
+        Refresh()
+    end
+end
+
 local function OptionToggle(order, name, key, desc)
     return {
         type = "toggle", order = order, name = name, desc = desc, width = "normal",
         get = function() return Settings()[key] end,
         set = function(_, v)
             Settings()[key] = v == true
+            SettingsChanged()
         end,
     }
 end
@@ -1661,7 +2024,7 @@ local function PriceRange(order, name, min, max, desc, key)
     return {
         type = "range", order = order, name = name, desc = desc, min = min, max = max, step = 1,
         get = function() return Settings()[key] end,
-        set = function(_, v) Settings()[key] = v end,
+        set = function(_, v) Settings()[key] = v; SettingsChanged() end,
     }
 end
 
@@ -1670,13 +2033,22 @@ ns.RegisterFeature({
     title = "Writ & Crate Planner",
     tab = "helpers",
     description = "Plans the cheapest Craftsman's Writs and Waylaid Crates for a trade camp rep or Merchant's Favor target from Auctionator prices, and turns the plan into an Auctionator shopping list.",
-    help = "Finds the cheapest writs, crates and delivery receipts for a reputation or Merchant's Favor target from your Auctionator prices. At the auction house, click Writ Planner (or type /klh writs), enter a target and click Search. Create macros adds macros that apply receipts and fill crates.",
+    help = "Finds the cheapest writs, crates and delivery receipts for a reputation or Merchant's Favor target from your saved Auctionator prices. Open it from the helpers menu or /klh writs. At the auction house, enter a target and click Search for live listings. Away from the auction house, browse the last completed result of this session. Create macros adds macros that apply receipts and fill crates.",
+    launcher = { text = "Writ & Crate Planner", onClick = function()
+        local auc = Api()
+        if auc and auc.GetAuctionPriceByItemID and auc.CreateShoppingList and auc.ConvertToSearchString then
+            ToggleWindow()
+        else
+            ns.Print("Writ & Crate Planner needs a compatible Auctionator API.")
+        end
+    end },
     requires = { "Auctionator" },
     alwaysOn = true,
     commands = { "writs" },
     defaults = {
         countBank = false, useFavorForReceipts = false, liveMinQty = 10,
-        priceMethod = "typical", historyDays = 14, minDays = 5, cheapBelow = 15, highAbove = 15, dontBuyAbove = 50,
+        priceMethod = "typical", historyDays = 14, minDays = 5, halfLife = 4, cheapBelow = 15, highAbove = 15, dontBuyAbove = 50,
+        marketShare = 25,
     },
     enable = function()
         RegisterObservers()
@@ -1707,15 +2079,21 @@ ns.RegisterFeature({
         events:SetScript("OnEvent", function(_, event, arg)
             if event == "AUCTION_HOUSE_SHOW" then
                 depth.ahOpen = true
+                if completed then completed.pricesStale = true end
+                if window and shown then Show(last or shown) end
                 if depth.queue then depth.queue:OnEvent(event) end
                 ShowAHButton(false)
+                scanWatch.scanning, scanWatch.elapsed = Scanning(), 0
+                events:SetScript("OnUpdate", WatchScan)
+                C_Timer.After(0, RefreshMarket)
             elseif event == "AUCTION_HOUSE_CLOSED" then
                 depth.ahOpen = false
-                local closeWindow = depth.openedAtAH and window and window:IsShown()
-                if closeWindow then
-                    depth.run = nil
-                    if last and last.progress then last = nil end
-                end
+                if completed then completed.pricesStale = true end
+                events:SetScript("OnUpdate", nil)
+                local closeWindow = window and window:IsShown()
+                if last and (last.progress or last.waiting) then P.Cancel()
+                elseif not last and completed then RestoreCompleted() end
+                if window and shown then Show(last or shown) end
                 if depth.queue then depth.queue:OnEvent(event) end
                 if ahButton then ahButton:Hide() end
                 if closeWindow then window:Hide() end
@@ -1731,6 +2109,7 @@ ns.RegisterFeature({
             end
         end)
     end,
+    onReset = SettingsChanged,
     options = function()
         return {
             countBank = OptionToggle(1, "Count bank items", "countBank",
@@ -1742,21 +2121,23 @@ ns.RegisterFeature({
                 desc = "For items you buy at least this many of, the planner looks up their auction house listings and adds up "
                     .. "what buying that many really costs, cheapest first. Smaller buys use Auctionator's cheapest price.",
                 get = function() return Settings().liveMinQty or LIVE_MIN_QTY end,
-                set = function(_, v) Settings().liveMinQty = v end,
+                set = function(_, v) Settings().liveMinQty = v; SettingsChanged() end,
             },
             priceHeader = { type = "header", order = 4, name = "Price check" },
             priceMethod = {
                 type = "select", order = 5, name = "Usual price from",
-                desc = "How the usual cost per rep or Favor is worked out from Auctionator's price history. Typical prices: the median daily low of each item. Past days: the plan priced for each past day, then the median of those costs.",
+                desc = "Typical prices uses each item's recency-weighted median daily low; Past days uses the recency-weighted median of daily plan costs. Past days carries the last known price forward; otherwise missing history falls back to the current scan price.",
                 values = { typical = "Typical prices", days = "Past days" },
                 get = function() return Settings().priceMethod end,
-                set = function(_, v) Settings().priceMethod = v end,
+                set = function(_, v) Settings().priceMethod = v; SettingsChanged() end,
             },
             historyDays = PriceRange(6, "History days", 3, 21, "How many days of price history count as usual.", "historyDays"),
-            minDays = PriceRange(7, "Minimum days", 2, 14, "Fewest days of price history needed before a verdict is shown.", "minDays"),
-            cheapBelow = PriceRange(8, "Cheap below (%)", 5, 50, "Marks a plan Cheap when it costs at least this much less than usual.", "cheapBelow"),
-            highAbove = PriceRange(9, "High above (%)", 5, 100, "Marks a plan High when it costs more than this much above usual.", "highAbove"),
-            dontBuyAbove = PriceRange(10, "Don't buy above (%)", 20, 200, "Marks a plan Don't buy when it costs more than this much above usual.", "dontBuyAbove"),
+            halfLife = PriceRange(6.5, "Price half-life (days)", 1, 21, "Recent history weighs more; this sets how quickly its weight halves.", "halfLife"),
+            minDays = PriceRange(7, "Minimum days", 2, 14, "Fewest days with history for any of the selected items before a verdict is shown. The effective minimum is capped at History days; days are counted across items, not required for each item.", "minDays"),
+            cheapBelow = PriceRange(8, "Cheap below (%)", 5, 50, "Marks a plan Cheap when its rounded whole-percent difference is at least this much below usual.", "cheapBelow"),
+            highAbove = PriceRange(9, "High above (%)", 5, 100, "Marks a plan High when its rounded whole-percent difference is above this threshold. Don't buy takes priority if thresholds overlap.", "highAbove"),
+            dontBuyAbove = PriceRange(10, "Don't buy above (%)", 20, 200, "Marks a plan Don't buy when its rounded whole-percent difference is above this threshold. This takes priority over High when thresholds overlap.", "dontBuyAbove"),
+            marketShare = PriceRange(11, "Market index share (%)", 5, 100, "The chevron on the Writ Planner button at the auction house compares the cheapest share of writs and of crates with their usual price.", "marketShare"),
             macroRow = { type = "description", order = 19, name = "", width = "full" },
             macros = {
                 type = "execute", order = 20, name = "Create macros",
