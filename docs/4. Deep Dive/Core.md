@@ -8,7 +8,7 @@
 
 - Detect the client: `ns.IS_FOREVER` is true when `GetBuildInfo()` returns a build number from 16000 up to 19999.
 - Register features and decide which ones are active on this client with these addons.
-- Provide settings (`ns.GetSettings`, `ns.IsEnabled`, `ns.ResetFeature`) on top of the AceDB store `KLH_DB`.
+- Provide settings (`ns.GetSettings`, `ns.IsEnabled`, `ns.ResetFeature`) on top of the AceDB database inside `KLH_Store`.
 - Start features at `PLAYER_LOGIN` and build the options at `ADDON_LOADED`.
 - Provide the slash command, its alias notice and the sub-command registry.
 - Provide small helpers: `ns.Print`, `ns.AddonLoaded`, `ns.AddonTitle`, `ns.RequiresText`, `ns.StripColors`, `ns.CharData`.
@@ -49,6 +49,7 @@ classDiagram
         alwaysOn
         defaults
         commands
+        launcher
         enable(settings)
         disable(settings)
         options(settings)
@@ -68,11 +69,12 @@ classDiagram
 |---|---|
 | `ns.RegisterFeature(spec)` | Asserts `spec.key` (string) and `spec.enable` (function), rejects a duplicate key, returns when `ClientAllows` is false, stores the spec, appends the key to `featureOrder`, and maps each of `spec.commands` (lower case) to the key. |
 | `ns.FEATURE_CLIENTS` | Table `key -> "all" / "forever" / "retail"`. Missing key means no client, and `RegisterFeature` prints a one-time developer error for it. Current: `TustUIXPBar = "all"`, the other four (`QuestieRXPSync`, `TurnInRoute`, `WritCratePlanner`, `SoulstoneReminder`) `"forever"`. |
+| `ns.Launchers()` | Returns menu entries from features whose enable succeeded and have a `launcher`, in registration order. Each launcher has a string `text` and function `onClick`, validated at registration. |
 | `ns.ClientAllows(key, isForever)` | Pure check against `FEATURE_CLIENTS`. |
 | `ns.MissingAddons(spec, isLoaded)` | Returns the names in `spec.requires` that `isLoaded` rejects. |
 | `ns.ShouldEnable(spec, ctx)` | Client allowed, no missing addons, and `alwaysOn` or `ctx.enabled`. |
 | `ns.GetSettings(key)` | Returns `profile.features[key]` (creating it) with a read-through metatable on the spec defaults: a nil key reads the default, and a table default is deep-copied into the settings on first read. Never cache the profile table: a profile switch replaces it. |
-| `ns.CharData(key)` | Returns the per-character table `KLH_CharDB[key]` (creating it). |
+| `ns.CharData(key)` | Returns the per-character table `db.char[key]` (creating it). |
 | `ns.IsEnabled(key)` | True for `alwaysOn`, else `settings.enabled == true`. |
 | `ns.ResetFeature(key)` | Sets `profile.features[key] = nil`. Only `core_test.lua` calls it; the options have no per-feature Reset. |
 | `ns.WasEnabledAtLoad(key)` | True if the feature runs: `enable` ran at login (or later through `ApplyFeature`) and `disable` has not run since. |
@@ -96,7 +98,7 @@ The loader frame handles two events. On `ADDON_LOADED` for this addon it calls `
 
 ### Settings
 
-`Profile()` creates the AceDB store lazily with `{ profile = { features = {} } }` as defaults. Without a default profile name AceDB gives each character its own profile. The `profile` defaults hold only the empty `features` table. `RegisterFeature` builds a read-through metatable from `spec.defaults`, and `GetSettings` attaches it to the settings table, so a new default key reaches existing profiles on the next read.
+`Profile()` creates the AceDB store lazily with `{ profile = { features = {} } }` as defaults. AceDB uses the shared `Default` profile for characters without an existing profile mapping; explicit mappings remain unchanged. The `profile` defaults hold only the empty `features` table. `RegisterFeature` builds a read-through metatable from `spec.defaults`, and `GetSettings` attaches it to the settings table, so a new default key reaches existing profiles on the next read.
 
 ### Slash command
 
@@ -123,3 +125,12 @@ Several pieces check for a global before use (`_G.CreateFrame`, `_G.SlashCmdList
 ## Potential Improvements
 
 - `ns.ResetFeature` has no caller outside the tests since the per-feature Reset button was removed; drop it or give it a use.
+
+
+## Storage envelope and migrations
+
+`KLH_Store` is the only declared SavedVariable. It holds `schemaVersion` outside `database`, the table passed to AceDB. `ns.CharData(key)` accesses `ns.GetDB().char[key]`; character data is separate from profiles and is not reset by profile resets. Version 0 is a hard cut: neither `KLH_DB` nor `KLH_CharDB` is imported.
+
+On first database access, `ns.StorageSchema()` creates the schema and migrates a copy of the entire raw envelope before AceDB initialization. Missing versions mean version 0. Invalid or future versions, missing steps, clone errors and failed steps abort initialization; the original global is replaced only after AceDB initializes successfully. AceDB profile operations are not wrapped or migrated at runtime. The schema engine is independent of addon and AceDB internals.
+
+Future versions require consecutive registered steps and synthetic fixtures with meaningful verifiers in `.tools/tests/storage_contract_test.lua`. The contract checks step and fixture coverage, not migration semantics, fixture completeness or in-game persistence.

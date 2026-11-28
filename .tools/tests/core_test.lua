@@ -22,7 +22,7 @@ local names = { "LibStub", "CreateFrame", "geterrorhandler", "print", "KLH_CharD
 local saved = {}
 for _, k in ipairs(names) do saved[k] = rawget(_G, k) end
 local printed, handler = {}, nil
-local fakeDB = { profile = { features = {} } }
+local fakeDB = { char = {}, profile = { features = {} } }
 _G.LibStub = function(name) if name == "AceDB-3.0" then return { New = function() return fakeDB end } end end
 _G.CreateFrame = function()
     return { RegisterEvent = function() end, UnregisterEvent = function() end, SetScript = function(_, _, fn) handler = fn end }
@@ -47,10 +47,36 @@ local good, problem = pcall(function()
     eq(ns.GetSettings("D1").n, 7, "changed default reaches an untouched setting")
 
     local ran = {}
-    ns.RegisterFeature({ key = "Bad", alwaysOn = true, enable = function() error("boom") end })
+    ns.FEATURE_CLIENTS.LaunchOne, ns.FEATURE_CLIENTS.LaunchOff = "all", "all"
+    ns.FEATURE_CLIENTS.LaunchPlain, ns.FEATURE_CLIENTS.LaunchTwo = "all", "all"
+    local clicked = false
+    ns.RegisterFeature({ key = "LaunchOne", alwaysOn = true, enable = function() end,
+        launcher = { text = "First", onClick = function() clicked = true end } })
+    ns.RegisterFeature({ key = "LaunchOff", enable = function() end,
+        launcher = { text = "Off", onClick = function() end } })
+    ns.RegisterFeature({ key = "LaunchPlain", alwaysOn = true, enable = function() end })
+    ns.RegisterFeature({ key = "Bad", alwaysOn = true, enable = function() error("boom") end,
+        launcher = { text = "Bad", onClick = function() end } })
     ns.RegisterFeature({ key = "Good", alwaysOn = true, enable = function() ran[#ran + 1] = "good" end })
     handler({ UnregisterEvent = function() end }, "PLAYER_LOGIN")
     eq(ran[1], "good", "a failing enable does not stop the next one"); eq(#errors, 1)
+    local launchers = ns.Launchers()
+    eq(#launchers, 1); eq(launchers[1].text, "First")
+    launchers[1].onClick(); ok(clicked, "launcher invokes its callback")
+    ns.RegisterFeature({ key = "LaunchTwo", alwaysOn = true, enable = function() end,
+        disable = function() end, launcher = { text = "Second", onClick = function() end } })
+    ns.ApplyFeature("LaunchTwo")
+    launchers = ns.Launchers()
+    eq(#launchers, 2); eq(launchers[2].text, "Second")
+    ns.FEATURE_CLIENTS.LiveBad = "all"
+    ns.RegisterFeature({ key = "LiveBad", alwaysOn = true, enable = function() error("live boom") end,
+        disable = function() end, launcher = { text = "Live bad", onClick = function() end } })
+    ns.ApplyFeature("LiveBad")
+    eq(#ns.Launchers(), 2, "failed live enable is not listed")
+    for _, launcher in ipairs({ {}, { text = 1, onClick = function() end }, { text = "Bad" } }) do
+        local valid = pcall(ns.RegisterFeature, { key = "Invalid", enable = function() end, launcher = launcher })
+        ok(not valid, "invalid launcher rejected")
+    end
 
     ns.RegisterFeature({ key = "Nowhere", enable = function() end })
     ns.RegisterFeature({ key = "Nowhere2", enable = function() end })
@@ -65,7 +91,7 @@ local good, problem = pcall(function()
 
     _G.KLH_CharDB = nil
     local cd = ns.CharData("x"); cd.v = 1
-    eq(_G.KLH_CharDB.x.v, 1); ok(ns.CharData("x") == cd, "same table")
+    eq(fakeDB.char.x.v, 1); ok(ns.CharData("x") == cd, "same table")
 end)
 for _, k in ipairs(names) do _G[k] = saved[k] end
 ok(good, tostring(problem))

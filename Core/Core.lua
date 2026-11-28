@@ -21,9 +21,39 @@ _G.KLH = ns
 
 local db
 
+function ns.StorageSchema()
+    local version = 0
+    return ns.Schema.New(version), version
+end
+
 local function Profile()
     if not db then
-        db = _G.LibStub("AceDB-3.0"):New("KLH_DB", { profile = { features = {} } })
+        local source = _G.KLH_Store
+        if source == nil then source = {} end
+        local schema = ns.StorageSchema()
+        local migrated, err = schema:Migrate(source)
+        if not migrated then error("KLH storage migration failed: " .. tostring(err)) end
+        if migrated.database == nil then migrated.database = {} end
+        if type(migrated.database) ~= "table" then error("KLH storage migration failed: invalid database") end
+        local ace = _G.LibStub("AceDB-3.0")
+        local registry, before = ace.db_registry, {}
+        if registry then for entry in pairs(registry) do before[entry] = true end end
+        local ok, initialized = pcall(function()
+            local candidate = ace:New(migrated.database, { profile = { features = {} } }, true)
+            local profile = candidate.profile
+            assert(type(profile) == "table", "invalid profile")
+            return candidate
+        end)
+        if not ok then
+            if registry then
+                for entry in pairs(registry) do
+                    if not before[entry] then registry[entry] = nil end
+                end
+            end
+            error("KLH storage initialization failed: " .. tostring(initialized))
+        end
+        _G.KLH_Store = migrated
+        db = initialized
     end
     return db.profile
 end
@@ -45,6 +75,8 @@ ns.FEATURE_CLIENTS = {
     WritCratePlanner = "forever",
     SoulstoneReminder = "forever",
     LayerPrompt = "forever",
+    MinimapButton = "all",
+    FarmTracker = "all",
 }
 
 function ns.ClientAllows(key, isForever)
@@ -109,6 +141,10 @@ function ns.RegisterFeature(spec)
     assert(type(spec) == "table" and type(spec.key) == "string", "feature needs a key")
     assert(not ns.features[spec.key], "duplicate feature " .. spec.key)
     assert(type(spec.enable) == "function", "feature needs enable()")
+    if spec.launcher ~= nil then
+        assert(type(spec.launcher) == "table" and type(spec.launcher.text) == "string"
+            and type(spec.launcher.onClick) == "function", "feature launcher needs text and onClick()")
+    end
     if ns.FEATURE_CLIENTS[spec.key] == nil then
         if not unlistedWarned[spec.key] then
             unlistedWarned[spec.key] = true
@@ -136,11 +172,7 @@ function ns.GetSettings(key)
 end
 
 function ns.CharData(key)
-    local root = _G.KLH_CharDB
-    if type(root) ~= "table" then
-        root = {}
-        _G.KLH_CharDB = root
-    end
+    local root = ns.GetDB().char
     if type(root[key]) ~= "table" then root[key] = {} end
     return root[key]
 end
@@ -155,12 +187,21 @@ function ns.ResetFeature(key)
     Profile().features[key] = nil
 end
 
-local enabledAtLoad = {}
+local enabledAtLoad, enableFailed = {}, {}
 function ns.WasEnabledAtLoad(key)
     return enabledAtLoad[key] == true
 end
 function ns.IsRunning(key)
     return ns.WasEnabledAtLoad(key)
+end
+
+function ns.Launchers()
+    local launchers = {}
+    for _, key in ipairs(ns.featureOrder) do
+        local launcher = ns.features[key].launcher
+        if launcher and ns.IsRunning(key) and not enableFailed[key] then launchers[#launchers + 1] = launcher end
+    end
+    return launchers
 end
 
 local function AddonLoaded(name)
@@ -175,7 +216,7 @@ local function EnableFeatures()
         local ctx = { isForever = ns.IS_FOREVER, isLoaded = AddonLoaded, enabled = ns.IsEnabled(key) }
         if ns.ShouldEnable(spec, ctx) then
             enabledAtLoad[key] = true
-            xpcall(spec.enable, _G.geterrorhandler(), ns.GetSettings(key))
+            enableFailed[key] = not xpcall(spec.enable, _G.geterrorhandler(), ns.GetSettings(key))
         end
     end
 end
@@ -187,7 +228,7 @@ function ns.ApplyFeature(key)
     local should = ns.ShouldEnable(spec, ctx)
     if should and not enabledAtLoad[key] then
         enabledAtLoad[key] = true
-        xpcall(spec.enable, _G.geterrorhandler(), ns.GetSettings(key))
+        enableFailed[key] = not xpcall(spec.enable, _G.geterrorhandler(), ns.GetSettings(key))
     elseif enabledAtLoad[key] and not should then
         enabledAtLoad[key] = nil
         xpcall(spec.disable, _G.geterrorhandler(), ns.GetSettings(key))

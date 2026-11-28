@@ -3,18 +3,25 @@
 ## Notes: Small helpers for questing, routes and professions.
 ## Author: lkshrk
 ## Version: @project-version@
-## OptionalDeps: Questie, RXPGuides, Tust_EUI, EllesmereUI, TomTom, Auctionator
+## OptionalDeps: Questie, RXPGuides, Tust_EUI, EllesmereUI, TomTom, Auctionator, ShortestPathForever
 ## X-Curse-Project-ID: 1829176
 ## X-Wago-ID: mNwwB2No
-## SavedVariables: KLH_DB
-## SavedVariablesPerCharacter: KLH_CharDB
+## IconTexture: Interface\Icons\INV_Pet_MechanicalSquirrel
+## AddonCompartmentFunc: KLH_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: KLH_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: KLH_OnAddonCompartmentLeave
+## SavedVariables: KLH_Store
 
 Libs\embeds.xml
 
 Core\Core.lua
+Core\Schema.lua
 Core\UI.lua
 Core\Skin.lua
+Core\Widgets.lua
+Core\OptionsModel.lua
 Core\Options.lua
+Core\OptionsWindow.lua
 Core\ListWindow.lua
 Data\TaxiPaths.lua
 Data\Teleports.lua
@@ -25,6 +32,7 @@ Modules\WritCrateState.lua
 Modules\TustUIXPBar.lua
 Modules\QuestieRXPSync.lua
 Modules\TurnInRouteGraph.lua
+Modules\ShortestPath.lua
 Modules\RouteDraw.lua
 Modules\RouteWaypoints.lua
 Modules\RoutePlanner.lua
@@ -36,3 +44,6 @@ Modules\WritCratePlanner.lua
 Modules\SoulstoneLogic.lua
 Modules\SoulstoneReminder.lua
 Modules\LayerPrompt.lua
+Modules\MinimapButton.lua
+Modules\FarmTrackerLogic.lua
+Modules\FarmTracker.lua

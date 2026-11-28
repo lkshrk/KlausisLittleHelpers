@@ -1,15 +1,12 @@
 local names = { "LibStub", "CreateFrame", "geterrorhandler", "StaticPopup_Show", "C_AddOns" }
 local saved = {}
 for _, k in ipairs(names) do saved[k] = rawget(_G, k) end
-local fakeDB = { profile = { features = {} }, callbacks = {} }
+local fakeDB = { char = {}, profile = { features = {} }, callbacks = {} }
 fakeDB.RegisterCallback = function(_, event, fn) fakeDB.callbacks[event] = fn end
 local notified, popups = 0, 0
 local libs = {
     ["AceDB-3.0"] = { New = function() return fakeDB end },
     ["AceDBOptions-3.0"] = { GetOptionsTable = function() return {} end },
-    ["AceConfig-3.0"] = { RegisterOptionsTable = function() end },
-    ["AceConfigDialog-3.0"] = { SetDefaultSize = function() end },
-    ["AceConfigRegistry-3.0"] = { NotifyChange = function() notified = notified + 1 end },
 }
 _G.LibStub = function(name) return libs[name] end
 _G.CreateFrame = nil
@@ -21,6 +18,7 @@ _G.C_AddOns = { IsAddOnLoaded = function(n) return loaded[n] == true end }
 local good, problem = pcall(function()
     addon("Core/Core.lua")
     addon("Core/Options.lua")
+    ns.NotifyOptionsChanged = function() notified = notified + 1 end
     local calls = {}
     local function Spec(key, extra)
         local spec = { key = key, title = key,
