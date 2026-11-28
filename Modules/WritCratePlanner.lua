@@ -1162,7 +1162,7 @@ local function Show(r)
     local summary = P.Summary(r)
     if r == completed and r.calculatedAt then
         local text = "Calculated: " .. _G.date("%Y-%m-%d %H:%M", r.calculatedAt)
-        if r.pricesStale then text = text .. "\nPrices may have changed - search again to refresh." end
+        if r.pricesStale then text = text .. "\n|cffffd100Prices may have changed - search again to refresh.|r" end
         if Stale(r) then text = text .. "\nProgress or daily reset changed - search again before shopping." end
         summary = { text = (summary and summary.text and summary.text .. "\n" or "") .. text }
     end
